@@ -2,6 +2,7 @@
 This is the repository for valuing individual players within pressing situation in football with symbolic regression methods.
 
 ### Library
+- This project was developed using Python 3.9.20.
 - Install the necessary libraries:
 - To use the latest version of the socceraction library, you need to clone it directly from GitHub because it cannot be updated through standard installation methods.
 ```bash
