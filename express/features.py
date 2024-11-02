@@ -920,6 +920,26 @@ def closest_players(actions, num_players=3):
 
     return pd.DataFrame(cloeset_xy, index=actions.index, columns=columns)
 
+@required_fields(["type_id"])
+@fs.simple
+def prev_action(actions):
+    """For each action, find previous events.
+
+    Parameters
+    ----------
+    actions : SPADLActions
+        The actions of a game.
+    
+    Returns:
+    - DataFrame: event types of actions.
+    """
+    df = pd.DataFrame(actions['type_id'])
+    
+    # 첫 event 결측치 0(pass)으로 대체
+    df['prev_type_id'] = df['type_id'].shift(1).fillna(0)
+
+    return pd.DataFrame(df['prev_type_id'])
+
 # parameter(radius) set
 defenders_in_3m_radius = required_fields(
     ["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"]
