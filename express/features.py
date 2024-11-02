@@ -5,13 +5,11 @@ base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(base_path)
 
 import math
-from functools import partial, reduce
-from typing import Callable, List, Optional
+from functools import partial, reduce, wraps
+from typing import Callable, List, Optional, no_type_check
 
 import numpy as np
 import pandas as pd
-import socceraction.vaep.features as fs
-from socceraction.vaep.features import gamestates as to_gamestates
 
 import express.config as config
 from express.databases import Database
@@ -79,12 +77,108 @@ def feature_column_names(fs: List[Callable], nb_prev_actions: int = 3) -> List[s
         if "name" in c:
             dummy_actions[c] = dummy_actions[c].astype(str)
 
-    gs = to_gamestates(dummy_actions, nb_prev_actions)  # type: ignore
+    gs = gamestates(dummy_actions, nb_prev_actions)  # type: ignore
 
     return list(pd.concat([f(gs) for f in fs], axis=1).columns.values)
 
+def gamestates(actions, nb_prev_actions: int = 3):
+    r"""Convert a dataframe of actions to gamestates.
+
+    Each gamestate is represented as the <nb_prev_actions> previous actions.
+
+    The list of gamestates is internally represented as a list of actions
+    dataframes :math:`[a_0,a_1,\ldots]` where each row in the a_i dataframe contains the
+    previous action of the action in the same row in the :math:`a_{i-1}` dataframe.
+
+    Parameters
+    ----------
+    actions : Actions
+        A DataFrame with the actions of a game.
+    nb_prev_actions : int, default=3  # noqa: DAR103
+        The number of previous actions included in the game state.
+
+    Raises
+    ------
+    ValueError
+        If the number of actions is smaller 1.
+
+    Returns
+    -------
+    GameStates
+         The <nb_prev_actions> previous actions for each action.
+    """
+
+    if nb_prev_actions < 1:
+        raise ValueError("The game state should include at least one preceding action.")
+    states = [actions]
+    for i in range(1, nb_prev_actions):
+        # Issue 1: List-type columns like ['visible_area_360', 'freeze_frame_360'] raise TypeError during interpolation.
+        # socceraction module update on 24.06.23 introduced an error when interpolating these columns:
+        # https://github.com/ML-KULeuven/socceraction/commit/e9c398ea50219eb6eb188c44c35ad70b7fd79cc6
+        
+        # Issue 2: All events missing 'freeze_frame_360' are interpolated unintentionally.
+        # The intended logic was to interpolate only the first event in each half, but other events without freeze_frame_360' are also filled with x.iloc[0], causing incorrect interpolations.                                                                              
+        # prev_actions = actions.groupby(["game_id", "period_id"], sort=False, as_index=False).apply(
+        #     lambda x: x.shift(i, fill_value=float("nan")).fillna(x.iloc[0])  # noqa: B023
+        # )
+
+        group_actions = actions.groupby(['game_id', 'period_id'], sort=False, as_index=False, group_keys=False)
+        prev_actions = group_actions.apply(lambda x: x.shift(i))
+        fill_indices = group_actions.head(i).index # First i rows per group get NaN, fill with original values
+        prev_actions.loc[fill_indices] = actions.loc[fill_indices]
+
+        states.append(prev_actions)  
+
+    return states
+
+@no_type_check
+def simple(actionfn: Callable):
+    """Make a function decorator to apply actionfeatures to game states.
+
+    Parameters
+    ----------
+    actionfn : Callable
+        A feature transformer that operates on actions.
+
+    Returns
+    -------
+    FeatureTransfomer
+        A feature transformer that operates on game states.
+    """
+
+    @wraps(actionfn)
+    def _wrapper(gamestates) -> pd.DataFrame:
+        if not isinstance(gamestates, (list,)):
+            gamestates = [gamestates]
+        X = []
+        for i, a in enumerate(gamestates):
+            Xi = actionfn(a)
+            Xi.columns = [c + "_a" + str(i) for c in Xi.columns]
+            X.append(Xi)
+        return pd.concat(X, axis=1)
+
+    return _wrapper
+
+
+@required_fields(["type_id"])
+@simple
+def actiontype(actions):
+    """Get the type of each action.
+
+    Parameters
+    ----------
+    actions : Actions
+        The actions of a game.
+
+    Returns
+    -------
+    Features
+        The 'type_id' of each action.
+    """
+    return pd.DataFrame(actions["type_id"])
+
 @required_fields(["type_name"])
-@fs.simple
+@simple
 def actiontype_onehot(actions):
     """Get the one-hot-encoded type of each action.
 
@@ -104,8 +198,26 @@ def actiontype_onehot(actions):
         X[col] = actions['type_name'] == type_name
     return X
 
+@required_fields(["result_id"])
+@simple
+def result(actions):
+    """Get the result of each action.
+
+    Parameters
+    ----------
+    actions : Actions
+        The actions of a game.
+
+    Returns
+    -------
+    Features
+        The 'result_id' of each action.
+    """
+
+    return pd.DataFrame(actions["result_id"], columns=["result_id"])
+
 @required_fields(["result_name"])
-@fs.simple
+@simple
 def result_onehot(actions):
     """Get the one-hot-encode result of each action.
 
@@ -125,8 +237,26 @@ def result_onehot(actions):
         X[col] = actions['result_name'] == result_name
     return X
 
+@required_fields(["bodypart_id"])
+@simple
+def bodypart(actions):
+    """Get the body part used to perform each action.
+
+    Parameters
+    ----------
+    actions : Actions
+        The actions of a game.
+
+    Returns
+    -------
+    Features
+        The 'bodypart_id' of each action.
+    """
+
+    return pd.DataFrame(actions["bodypart_id"], columns=["bodypart_id"])
+
 @required_fields(["bodypart_name"])
-@fs.simple
+@simple
 def bodypart_onehot(actions):
     """Get the one-hot-encoded bodypart of each action.
 
@@ -147,7 +277,7 @@ def bodypart_onehot(actions):
     return X
 
 @required_fields(["period_id", "time_seconds"])
-@fs.simple
+@simple
 def time(actions):
     """Get the time when each action was performed.
 
@@ -176,7 +306,7 @@ def time(actions):
     return timedf
 
 @required_fields(["start_x", "start_y"])
-@fs.simple
+@simple
 def startlocation(actions):
     """Get the location where each action started.
 
@@ -185,7 +315,7 @@ def startlocation(actions):
     actions : pd.DataFrame
         The actions of a game.
 
-    Returns
+    Returnss
     -------
     pd.DataFrame
         The 'start_x' and 'start_y' location of each action.
@@ -194,7 +324,7 @@ def startlocation(actions):
 
 
 @required_fields(["end_x", "end_y"])
-@fs.simple
+@simple
 def endlocation(actions):
     """Get the location where each action ended.
 
@@ -211,7 +341,7 @@ def endlocation(actions):
     return actions[['end_x', 'end_y']]
 
 @required_fields(["start_x", "start_y"])
-@fs.simple
+@simple
 def startpolar(actions):
     """Get the polar coordinates of each action's start location.
 
@@ -237,7 +367,7 @@ def startpolar(actions):
 
 
 @required_fields(["end_x", "end_y"])
-@fs.simple
+@simple
 def endpolar(actions):
     """Get the polar coordinates of each action's end location.
 
@@ -262,7 +392,7 @@ def endpolar(actions):
     return polardf
 
 @required_fields(["start_x", "start_y", "end_x", "end_y"])
-@fs.simple
+@simple
 def movement(actions):
     """Get the distance covered by each action.
 
@@ -397,7 +527,7 @@ def goalscore(gamestates):
     return scoredf
 
 @required_fields(["start_x", "start_y"])
-@fs.simple
+@simple
 def relative_startlocation(actions):
     """Get the location where each action started relative to the sideline and goalline.
 
@@ -417,7 +547,7 @@ def relative_startlocation(actions):
     return actions[["start_dist_sideline", "start_dist_goalline"]]
 
 @required_fields(["end_x", "end_y"])
-@fs.simple
+@simple
 def relative_endlocation(actions):
     """Get the location where each action ended relative to the sideline and goalline.
 
@@ -437,7 +567,7 @@ def relative_endlocation(actions):
     return actions[["end_dist_sideline", "end_dist_goalline"]]
 
 @required_fields(["start_x", "start_y", "end_x", "end_y"])
-@fs.simple
+@simple
 def angle(actions):
     """Get the angle between the start and end location of an action.
 
@@ -493,7 +623,7 @@ def speed(gamestates):
 
 
 @required_fields(["under_pressure"])
-@fs.simple
+@simple
 def under_pressure(actions):
     """Get the value of StatsBomb's 'under_pressure' attribute.
 
@@ -523,7 +653,7 @@ def under_pressure(actions):
 
 
 @required_fields(["period_id", "time_seconds", "player_id", "type_name"])
-@fs.simple
+@simple
 def player_possession_time(actions):
     """Get the time (sec) a player was in ball possession before attempting the action.
 
@@ -553,7 +683,7 @@ def player_possession_time(actions):
     return df[["player_possession_time"]].fillna(0)
 
 @required_fields(["extra"])
-@fs.simple
+@simple
 def ball_height_onehot(actions):
     """Get the one_hot_encoded height of a pass.
 
@@ -656,7 +786,7 @@ def _get_passing_cone(start, end, dist=1):
 
 
 @required_fields(["freeze_frame_360", "start_x", "start_y", "end_x", "end_y"])
-@fs.simple
+@simple
 def nb_opp_in_path(actions, path_width: int = 1):
     """Get the number of opponents in the path between the start and end location of a pass.
 
@@ -696,7 +826,7 @@ def nb_opp_in_path(actions, path_width: int = 1):
     return df
 
 @required_fields(["freeze_frame_360", "start_x", "start_y", "end_x", "end_y"])
-@fs.simple
+@simple
 def packing_rate(actions):
     """Get the number of defenders that are outplayed by a pass.
 
@@ -797,7 +927,7 @@ def _opponents_in_radius(actions, radius: int = 1):
     )
 
 @required_fields(["freeze_frame_360", "start_x", "start_y", "end_x", "end_y"])
-@fs.simple
+@simple
 def dist_opponent(actions):
     """Get the distance to the nearest defender.
 
@@ -877,8 +1007,8 @@ def closest_players(actions, num_players=3):
     - DataFrame: Contains x, y, and distance for each of the closest teammates and opponents.
     """
 
-    cloeset_teammates_xy = np.zeros((len(actions), num_players*3), dtype=int) # x, y, distance for each player
-    cloeset_opponents_xy = np.zeros((len(actions), num_players*3), dtype=int) # x, y, distance for each player
+    cloeset_teammates_xy = np.zeros((len(actions), num_players*3), dtype=float) # x, y, distance for each player
+    cloeset_opponents_xy = np.zeros((len(actions), num_players*3), dtype=float) # x, y, distance for each player
     for i, (_, action) in enumerate(actions.iterrows()):
         if not action["freeze_frame_360"]:
             continue
@@ -920,40 +1050,23 @@ def closest_players(actions, num_players=3):
 
     return pd.DataFrame(cloeset_xy, index=actions.index, columns=columns)
 
-@required_fields(["type_id"])
-@fs.simple
-def prev_action(actions):
-    """For each action, find previous events.
-
-    Parameters
-    ----------
-    actions : SPADLActions
-        The actions of a game.
-    
-    Returns:
-    - DataFrame: event types of actions.
-    """
-    df = pd.DataFrame(actions['type_id'])
-    
-    # 첫 event 결측치 0(pass)으로 대체
-    df['prev_type_id'] = df['type_id'].shift(1).fillna(0)
-
-    return pd.DataFrame(df['prev_type_id'])
-
 # parameter(radius) set
 defenders_in_3m_radius = required_fields(
     ["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"]
-)(fs.simple(partial(_opponents_in_radius, radius=3)))
+)(simple(partial(_opponents_in_radius, radius=3)))
 defenders_in_3m_radius.__name__ = "defenders_in_3m_radius"
 
 closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"])(
-    fs.simple(partial(closest_players, num_players=3))
+    simple(partial(closest_players, num_players=3))
 )
 closest_3_players.__name__ = "closest_3_players"
 
 all_features = [
+    actiontype,
     actiontype_onehot,
+    result,
     result_onehot,
+    bodypart,
     bodypart_onehot,
 
     time,
@@ -1033,12 +1146,12 @@ def get_features(
 
     # convert actions to gamestates
     home_team_id, _ = db.get_home_away_team_id(game_id)
-    gamestates = play_left_to_right(to_gamestates(actions, nb_prev_actions), home_team_id)
+    states = play_left_to_right(gamestates(actions, nb_prev_actions), home_team_id)
 
     # compute features
     df_features = reduce(
         lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
-        (fn(gamestates).loc[idx] for fn in xfns),
+        (fn(states).loc[idx] for fn in xfns),
     )
 
     return df_features
