@@ -1050,14 +1050,76 @@ def closest_players(actions, num_players=3):
 
     return pd.DataFrame(cloeset_xy, index=actions.index, columns=columns)
 
+@required_fields(["freeze_frame_360", "start_x", "start_y"])
+@simple
+def extract_all_players(actions):
+    """
+    Extracts the location and distance of all teammates and opponents captured in each action's freeze_frame_360 data.
+    If there are fewer players than the total number expected (10 teammates and 11 opponents), missing values are filled with NaN.
+
+    Parameters
+    ----------
+    actions : SPADLActions
+        The actions of a game.
+    num_players (int): Number of closest teammates and opponents to find for each action.
+
+    Returns:
+    - DataFrame: Contains x, y, and distance for each of the closest teammates and opponents.
+    """
+
+    MAX_TEAMMATES = 10 # exclude event player
+    MAX_OPPONENTS = 11
+    all_teammates_xy = np.full((len(actions), MAX_TEAMMATES * 3), np.nan, dtype=float)  # x, y, distance for each player
+    all_opponents_xy = np.full((len(actions), MAX_OPPONENTS * 3), np.nan, dtype=float)  # x, y, distance for each player
+    
+    for i, (_, action) in enumerate(actions.iterrows()):
+        if not action["freeze_frame_360"]:
+            continue
+        
+        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
+        start_x, start_y = action.start_x, action.start_y
+        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].copy() # exclude event player
+        opponent_locs = freeze_frame[~freeze_frame.teammate].copy()
+
+        # Sort by distance
+        teammate_locs['distance'] = np.sqrt((teammate_locs['x'] - start_x) ** 2 + (teammate_locs['y'] - start_y) ** 2)
+        opponent_locs['distance'] = np.sqrt((opponent_locs['x'] - start_x) ** 2 + (opponent_locs['y'] - start_y) ** 2)
+        num_teammates = len(teammate_locs)
+        num_opponents = len(opponent_locs)
+
+        closest_teammates_df = teammate_locs.nsmallest(num_teammates, 'distance')[['x', 'y', 'distance']]
+        closest_opponents_df = opponent_locs.nsmallest(num_opponents, 'distance')[['x', 'y', 'distance']]
+ 
+        for j in range(num_teammates):
+            all_teammates_xy[i, j * 3] = closest_teammates_df.iloc[j]['x']
+            all_teammates_xy[i, j * 3 + 1] = closest_teammates_df.iloc[j]['y']
+            all_teammates_xy[i, j * 3 + 2] = closest_teammates_df.iloc[j]['distance']
+
+        for j in range(num_opponents):
+            all_opponents_xy[i, j * 3] = closest_opponents_df.iloc[j]['x']
+            all_opponents_xy[i, j * 3 + 1] = closest_opponents_df.iloc[j]['y']
+            all_opponents_xy[i, j * 3 + 2] = closest_opponents_df.iloc[j]['distance']
+
+    # Combine teammate and opponent data
+    all_player_xy = np.hstack((all_teammates_xy, all_opponents_xy))
+
+    # Generate column names
+    columns = []
+    for k in range(1, MAX_TEAMMATES + 1):
+        columns.extend([f"teammate_{k}_x", f"teammate_{k}_y", f"teammate_{k}_distance"])
+    for k in range(1, MAX_OPPONENTS + 1):
+        columns.extend([f"opponent_{k}_x", f"opponent_{k}_y", f"opponent_{k}_distance"])
+
+    return pd.DataFrame(all_player_xy, index=actions.index, columns=columns)
+
+
 # parameter(radius) set
-defenders_in_3m_radius = required_fields(
-    ["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"]
-)(simple(partial(_opponents_in_radius, radius=3)))
+defenders_in_3m_radius = required_fields(["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"])(
+    simple(partial(_opponents_in_radius, radius=3)))
 defenders_in_3m_radius.__name__ = "defenders_in_3m_radius"
 
 closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"])(
-    simple(partial(closest_players, num_players=3))
+   simple(partial(closest_players, num_players=3))
 )
 closest_3_players.__name__ = "closest_3_players"
 
@@ -1096,6 +1158,7 @@ all_features = [
     dist_opponent,
     defenders_in_3m_radius,
     closest_3_players,
+    extract_all_players,
 ]
 
 
