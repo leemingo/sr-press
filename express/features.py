@@ -1112,6 +1112,53 @@ def extract_all_players(actions):
 
     return pd.DataFrame(all_player_xy, index=actions.index, columns=columns)
 
+@required_fields(["freeze_frame_360", "start_x", "start_y"])
+@simple
+def expected_receiver_and_presser(actions, min_players=3):
+    distances = np.full((len(actions), min_players), np.nan, dtype=float)
+
+    for i, (_, action) in enumerate(actions.iterrows()):
+        if not action["freeze_frame_360"]:
+            continue
+
+        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
+        start_x, start_y = action.start_x, action.start_y
+        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].reset_index(drop=True) # Exclude event player
+        opponent_locs = freeze_frame[~freeze_frame.teammate].reset_index(drop=True)
+
+        if len(teammate_locs) < 3 or len(opponent_locs) < 3:
+            continue
+        
+        # Calculate the closest opponent to the start location(presser target)
+        dist_presser_to_target = np.sqrt((opponent_locs.x - start_x) ** 2 + (opponent_locs.y - start_y) ** 2)
+        target_idx = np.argmin(dist_presser_to_target)
+        target_x, target_y = opponent_locs.loc[target_idx, ["x", "y"]].values
+       
+        # expected-receiver
+        dists_to_target = np.sqrt((opponent_locs.x - target_x) ** 2 + (opponent_locs.y - target_y) ** 2)
+        expected_receivers_idx = np.argsort(dists_to_target)[1:min_players] # Exclude the target itself
+
+        # expected-presser
+        expected_pressers_idx = []
+        for receiver_idx in expected_receivers_idx:
+            receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
+
+            # Note: Multiple pressers may target the same receiver.
+            dists_to_receiver = np.sqrt((teammate_locs.x - receiver_x) ** 2 + (teammate_locs.y - receiver_y) ** 2)
+            presser_idx = np.argmin(dists_to_receiver)
+            expected_pressers_idx.append(presser_idx) 
+
+        distances[i, 0] = np.sqrt((start_x - target_x) ** 2 + (start_y - target_y) ** 2)
+        for j, (presser_idx, receiver_idx) in enumerate(zip(expected_pressers_idx, expected_receivers_idx)):
+            presser_x, presser_y = teammate_locs.loc[presser_idx, ["x", "y"]].values
+            receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
+
+            distances[i, j+1] = np.sqrt((presser_x - receiver_x) ** 2 + (presser_y - receiver_y) ** 2)
+        
+    # Generate column names
+    columns = [f"teammate_opponent_distance{i}" for i in range(1, min_players+1)]
+
+    return pd.DataFrame(distances, index=actions.index, columns=columns)
 
 # parameter(radius) set
 defenders_in_3m_radius = required_fields(["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"])(
@@ -1159,6 +1206,7 @@ all_features = [
     defenders_in_3m_radius,
     closest_3_players,
     extract_all_players,
+    expected_receiver_and_presser
 ]
 
 
