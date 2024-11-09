@@ -1115,28 +1115,31 @@ def extract_all_players(actions):
 @required_fields(["freeze_frame_360", "start_x", "start_y"])
 @simple
 def expected_receiver_and_presser(actions, min_players=3):
-    distances = np.full((len(actions), min_players), np.nan, dtype=float)
-
-    for i, (_, action) in enumerate(actions.iterrows()):
+    distances = np.full((len(actions), min_players*2 - 1), np.nan, dtype=float)
+    angles = np.full((len(actions), min_players*2 - 1), np.nan, dtype=float)
+    
+    for i, (_, action) in enumerate(actions.iterrows()):  
         if not action["freeze_frame_360"]:
             continue
 
         freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
         start_x, start_y = action.start_x, action.start_y
-        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].reset_index(drop=True) # Exclude event player
-        opponent_locs = freeze_frame[~freeze_frame.teammate].reset_index(drop=True)
+        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor & ~freeze_frame.keeper].reset_index(drop=True) # Exclude event player
+        opponent_locs = freeze_frame[~freeze_frame.teammate & ~freeze_frame.keeper].reset_index(drop=True)
 
-        if len(teammate_locs) < 3 or len(opponent_locs) < 3:
+        if (len(teammate_locs) < min_players-1) or (len(opponent_locs) < min_players):
             continue
         
-        # Calculate the closest opponent to the start location(presser target)
-        dist_presser_to_target = np.sqrt((opponent_locs.x - start_x) ** 2 + (opponent_locs.y - start_y) ** 2)
+        # Calculate the closest opponent to the start location(presser)
+        # np.hypot: Calculate Euclidean distance
+        dist_presser_to_target = np.hypot(opponent_locs.x - start_x, opponent_locs.y - start_y)
         target_idx = np.argmin(dist_presser_to_target)
         target_x, target_y = opponent_locs.loc[target_idx, ["x", "y"]].values
        
         # expected-receiver
-        dists_to_target = np.sqrt((opponent_locs.x - target_x) ** 2 + (opponent_locs.y - target_y) ** 2)
+        dists_to_target = np.hypot(opponent_locs.x - target_x, opponent_locs.y - target_y)
         expected_receivers_idx = np.argsort(dists_to_target)[1:min_players] # Exclude the target itself
+        expected_receivers_locs = opponent_locs.loc[expected_receivers_idx, ["x", "y"]].values
 
         # expected-presser
         expected_pressers_idx = []
@@ -1144,21 +1147,39 @@ def expected_receiver_and_presser(actions, min_players=3):
             receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
 
             # Note: Multiple pressers may target the same receiver.
-            dists_to_receiver = np.sqrt((teammate_locs.x - receiver_x) ** 2 + (teammate_locs.y - receiver_y) ** 2)
+            dists_to_receiver = np.hypot(teammate_locs.x - receiver_x, teammate_locs.y - receiver_y)
+
             presser_idx = np.argmin(dists_to_receiver)
             expected_pressers_idx.append(presser_idx) 
+        expected_presser_locs = teammate_locs.iloc[expected_pressers_idx][["x", "y"]].values
 
-        distances[i, 0] = np.sqrt((start_x - target_x) ** 2 + (start_y - target_y) ** 2)
-        for j, (presser_idx, receiver_idx) in enumerate(zip(expected_pressers_idx, expected_receivers_idx)):
-            presser_x, presser_y = teammate_locs.loc[presser_idx, ["x", "y"]].values
-            receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
+        # Compute distances and angles between presser and target
+        distances[i, 0] = np.hypot(target_x - start_x, target_y - start_y)
+        angles[i, 0] = np.arctan2(target_x - start_x, target_y - start_y)
 
-            distances[i, j+1] = np.sqrt((presser_x - receiver_x) ** 2 + (presser_y - receiver_y) ** 2)
-        
-    # Generate column names
-    columns = [f"teammate_opponent_distance{i}" for i in range(1, min_players+1)]
+        # Compute distances and angles between presser and expected receivers
+        distances[i, 1:min_players] = np.hypot(expected_receivers_locs[:, 0] - start_x, expected_receivers_locs[:, 1] - start_y)
+        angles[i, 1:min_players] = np.arctan2(expected_receivers_locs[:, 0] - start_x, expected_receivers_locs[:, 1] - start_y)
 
-    return pd.DataFrame(distances, index=actions.index, columns=columns)
+        # Compute distances and angles between presser and expected presser
+        distances[i, min_players:] = np.hypot(expected_presser_locs[:, 0] - start_x, expected_presser_locs[:, 1] - start_y)
+        angles[i, min_players:] = np.arctan2(expected_presser_locs[:, 0] - start_x, expected_presser_locs[:, 1] - start_y)
+
+    distance_columns = (
+        ["distance_to_target"]
+        + [f"distance_to_expected_receiver{idx}" for idx in range(1, min_players)]
+        + [f"distance_to_expected_presser{idx}" for idx in range(1, min_players)]
+    )
+    angle_columns = (
+        ["angle_to_target"]
+        + [f"angle_to_expected_receiver{idx}" for idx in range(1, min_players)]
+        + [f"angle_to_expected_presser{idx}" for idx in range(1, min_players)]
+    )
+    # Create DataFrames for distances and angles
+    distances_df = pd.DataFrame(distances, index=actions.index, columns=distance_columns)
+    angles_df = pd.DataFrame(angles, index=actions.index, columns=angle_columns)
+
+    return pd.concat([distances_df, angles_df], axis=1)
 
 # parameter(radius) set
 defenders_in_3m_radius = required_fields(["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"])(
@@ -1240,6 +1261,7 @@ def get_features(
     # retrieve actions from database
     
     actions = add_names(db.actions(game_id))
+
     # filter actions of interest
     if actionfilter is None:
         idx = pd.Series([True] * len(actions), index=actions.index)
@@ -1254,9 +1276,10 @@ def get_features(
     if len(xfns) < 1:
         return pd.DataFrame(index=actions.index.values[idx])
     
-
+    
     # convert actions to gamestates
     home_team_id, _ = db.get_home_away_team_id(game_id)
+
     states = play_left_to_right(gamestates(actions, nb_prev_actions), home_team_id)
 
     # compute features
