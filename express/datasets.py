@@ -38,10 +38,12 @@ class PressingDataset(Dataset):
         path: Optional[os.PathLike[str]] = None, 
         load_cached: bool = True,
         nb_prev_actions: int = 1,
+        min_players: int = None,
     ):
 
         # Check requested features and labels
         self.nb_prev_actions = nb_prev_actions
+        self.min_players = min_players
         self.transform = transform
 
         self.xfns = self._parse_xfns(xfns)
@@ -120,11 +122,23 @@ class PressingDataset(Dataset):
                 parsed_yfns.append(yfn)
         return parsed_yfns
 
-    @staticmethod
-    def actionfilter(actions: pd.DataFrame) -> pd.Series:
+    # The @staticmethod decorator is removed to access `min_players` from the PressingDataset instance.
+    # By removing it, we can utilize `self.min_players` directly within this method.
+    # @staticmethod
+    def actionfilter(self, actions: pd.DataFrame) -> pd.Series:
         is_pressing = (actions.type_id == config.actiontypes.index("pressing"))  # pressing
         is_visible_area_360 = actions["visible_area_360"].notna()  # visible_area_360
-        return is_pressing & is_visible_area_360
+
+        # Check if freeze_frame_360 has at least 3 teammates and 3 opponents
+        has_required_players = actions["freeze_frame_360"].apply(lambda frame: (
+            frame is not None and
+            sum(player["teammate"] for player in frame) >= self.min_players and
+            sum(not player["teammate"] for player in frame) >= self.min_players
+        ))
+
+        # Ensure the action starts in the attacking third
+        in_attacking_third = actions["start_x"] > config.field_length * (2 / 3)
+        return is_pressing & is_visible_area_360 & has_required_players & in_attacking_third
 
     def create(self, db) -> None:
         """Create the dataset.
@@ -153,7 +167,7 @@ class PressingDataset(Dataset):
                             game_id=game_id,
                             xfns=[xfn],
                             nb_prev_actions=self.nb_prev_actions,
-                            actionfilter=PressingDataset.actionfilter,
+                            actionfilter=self.actionfilter,
                         )
                     )
                 
@@ -175,7 +189,7 @@ class PressingDataset(Dataset):
                             db,
                             game_id=game_id,
                             yfns=[yfn],
-                            actionfilter=PressingDataset.actionfilter,
+                            actionfilter=self.actionfilter,
                         )
                     )
                 df_labels_yfn = pd.concat(df_labels_yfn)
@@ -242,4 +256,3 @@ class PressingDataset(Dataset):
             sample = self.transform(sample)
 
         return sample
-
