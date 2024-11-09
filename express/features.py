@@ -413,91 +413,6 @@ def movement(actions):
     mov['movement'] = np.sqrt(mov.dx ** 2 + mov.dy ** 2)
     return mov
 
-@required_fields(["period_id", "player_id", "type_name", "start_x", "start_y", "end_x", "end_y"])
-@simple
-def player_possession_distance(actions):
-    """Get the cumulative distance a player has covered in possession before attempting the action.
-
-    Parameters
-    ----------
-    actions : SPADLActions
-        The actions of a game.
-
-    Returns
-    -------
-    pd.DataFrame
-        The cumulative 'player_possession_distance' for each action.
-    """
-    # 현재 액션과 이전 액션 데이터를 가져옵니다.
-    cur_action = actions[["period_id", "player_id", "type_name", "start_x", "start_y", "end_x", "end_y"]]
-    prev_action = actions.shift(1)[["period_id", "player_id", "end_x", "end_y"]]
-    
-    # 현재 액션과 이전 액션을 병합하여 비교할 수 있도록 합니다.
-    df = cur_action.join(prev_action, rsuffix="_prev")
-    
-    # 동일한 선수, 동일한 기간인지 확인합니다.
-    same_player = df.player_id == df.player_id_prev
-    same_period = df.period_id == df.period_id_prev
-    
-    # 이동 거리를 초기화합니다.
-    df["movement"] = np.sqrt((df["end_x"] - df["start_x"]) ** 2 + (df["end_y"] - df["start_y"]) ** 2)
-    
-    # 선수의 소유권이 유지되는 동안 누적 거리를 계산합니다.
-    df["player_possession_distance"] = 0
-    possession_distance = 0  # 누적 거리 초기화
-    
-    for i in range(len(df)):
-        if same_player.iloc[i] and same_period.iloc[i]:  # 소유권이 유지되는 동안
-            possession_distance += df["movement"].iloc[i]  # 이동 거리를 누적
-        else:
-            possession_distance = df["movement"].iloc[i]  # 소유권이 변경되면 거리 초기화
-        df.at[i, "player_possession_distance"] = possession_distance
-
-    return df[["player_possession_distance"]]
-
-
-
-@required_fields(["period_id", "player_id", "type_name", "time_seconds"])
-@simple
-def cumulative_possession_time(actions):
-    """Get the cumulative time a player has been in possession before attempting the action.
-
-    Parameters
-    ----------
-    actions : SPADLActions
-        The actions of a game.
-
-    Returns
-    -------
-    pd.DataFrame
-        The cumulative 'cumulative_possession_time' for each action.
-    """
-    # 현재 액션과 이전 액션 데이터를 가져옵니다.
-    cur_action = actions[["period_id", "time_seconds", "player_id", "type_name"]]
-    prev_action = actions.shift(1)[["period_id", "time_seconds", "player_id"]]
-    
-    # 현재 액션과 이전 액션을 병합하여 비교할 수 있도록 합니다.
-    df = cur_action.join(prev_action, rsuffix="_prev")
-    
-    # 동일한 선수, 동일한 기간인지 확인합니다.
-    same_player = df.player_id == df.player_id_prev
-    same_period = df.period_id == df.period_id_prev
-    
-    # 소유 시간을 초기화합니다.
-    df["time_difference"] = df["time_seconds"] - df["time_seconds_prev"]
-    df["time_difference"] = df["time_difference"].where(same_player & same_period, 0)
-    
-    # 소유권 유지 동안의 누적 시간을 계산합니다.
-    df["cumulative_possession_time"] = df["time_difference"].cumsum()
-    
-    # 소유권이 변경되면 누적 시간을 초기화합니다.
-    for i in range(1, len(df)):
-        if not same_player.iloc[i] or not same_period.iloc[i]:
-            df.at[i, "cumulative_possession_time"] = 0  # 소유권 변경 시 시간 초기화
-        else:
-            df.at[i, "cumulative_possession_time"] = df.at[i - 1, "cumulative_possession_time"] + df.at[i, "time_difference"]
-    
-    return df[["cumulative_possession_time"]].fillna(0)
 
 @required_fields(["team_id"])
 # @fs.simple: STATE FEATURES
@@ -1137,123 +1052,50 @@ def closest_players(actions, num_players=3):
 
     return pd.DataFrame(cloeset_xy, index=actions.index, columns=columns)
 
-@required_fields(["freeze_frame_360", "start_x", "start_y"])
 @simple
-def extract_all_players(actions):
-    """
-    Extracts the location and distance of all teammates and opponents captured in each action's freeze_frame_360 data.
-    If there are fewer players than the total number expected (10 teammates and 11 opponents), missing values are filled with NaN.
+def relative_actor_angle(actions, num_players=3):
+    """actor와 가장 가까운 팀원 및 상대 선수와의 각도를 구합니다.
 
     Parameters
     ----------
     actions : SPADLActions
-        The actions of a game.
-    num_players (int): Number of closest teammates and opponents to find for each action.
-
-    Returns:
-    - DataFrame: Contains x, y, and distance for each of the closest teammates and opponents.
-    """
-
-    MAX_TEAMMATES = 10 # exclude event player
-    MAX_OPPONENTS = 11
-    all_teammates_xy = np.full((len(actions), MAX_TEAMMATES * 3), np.nan, dtype=float)  # x, y, distance for each player
-    all_opponents_xy = np.full((len(actions), MAX_OPPONENTS * 3), np.nan, dtype=float)  # x, y, distance for each player
-    
-    for i, (_, action) in enumerate(actions.iterrows()):
-        if not action["freeze_frame_360"]:
-            continue
-        
-        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
-        start_x, start_y = action.start_x, action.start_y
-        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].copy() # exclude event player
-        opponent_locs = freeze_frame[~freeze_frame.teammate].copy()
-
-        # Sort by distance
-        teammate_locs['distance'] = np.sqrt((teammate_locs['x'] - start_x) ** 2 + (teammate_locs['y'] - start_y) ** 2)
-        opponent_locs['distance'] = np.sqrt((opponent_locs['x'] - start_x) ** 2 + (opponent_locs['y'] - start_y) ** 2)
-        num_teammates = len(teammate_locs)
-        num_opponents = len(opponent_locs)
-
-        closest_teammates_df = teammate_locs.nsmallest(num_teammates, 'distance')[['x', 'y', 'distance']]
-        closest_opponents_df = opponent_locs.nsmallest(num_opponents, 'distance')[['x', 'y', 'distance']]
- 
-        for j in range(num_teammates):
-            all_teammates_xy[i, j * 3] = closest_teammates_df.iloc[j]['x']
-            all_teammates_xy[i, j * 3 + 1] = closest_teammates_df.iloc[j]['y']
-            all_teammates_xy[i, j * 3 + 2] = closest_teammates_df.iloc[j]['distance']
-
-        for j in range(num_opponents):
-            all_opponents_xy[i, j * 3] = closest_opponents_df.iloc[j]['x']
-            all_opponents_xy[i, j * 3 + 1] = closest_opponents_df.iloc[j]['y']
-            all_opponents_xy[i, j * 3 + 2] = closest_opponents_df.iloc[j]['distance']
-
-    # Combine teammate and opponent data
-    all_player_xy = np.hstack((all_teammates_xy, all_opponents_xy))
-
-    # Generate column names
-    columns = []
-    for k in range(1, MAX_TEAMMATES + 1):
-        columns.extend([f"teammate_{k}_x", f"teammate_{k}_y", f"teammate_{k}_distance"])
-    for k in range(1, MAX_OPPONENTS + 1):
-        columns.extend([f"opponent_{k}_x", f"opponent_{k}_y", f"opponent_{k}_distance"])
-
-    return pd.DataFrame(all_player_xy, index=actions.index, columns=columns)
-
-@required_fields(["freeze_frame_360", "start_x", "start_y"])
-@simple
-def expected_receiver_and_presser(actions, min_players=3):
-    distances = np.full((len(actions), min_players), np.nan, dtype=float)
-
-    for i, (_, action) in enumerate(actions.iterrows()):
-        if not action["freeze_frame_360"]:
-            continue
-
-        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
-        start_x, start_y = action.start_x, action.start_y
-        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].reset_index(drop=True) # Exclude event player
-        opponent_locs = freeze_frame[~freeze_frame.teammate].reset_index(drop=True)
-
-        if len(teammate_locs) < 3 or len(opponent_locs) < 3:
-            continue
-        
-        # Calculate the closest opponent to the start location(presser target)
-        dist_presser_to_target = np.sqrt((opponent_locs.x - start_x) ** 2 + (opponent_locs.y - start_y) ** 2)
-        target_idx = np.argmin(dist_presser_to_target)
-        target_x, target_y = opponent_locs.loc[target_idx, ["x", "y"]].values
+    num_players : int
        
-        # expected-receiver
-        dists_to_target = np.sqrt((opponent_locs.x - target_x) ** 2 + (opponent_locs.y - target_y) ** 2)
-        expected_receivers_idx = np.argsort(dists_to_target)[1:min_players] # Exclude the target itself
-
-        # expected-presser
-        expected_pressers_idx = []
-        for receiver_idx in expected_receivers_idx:
-            receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
-
-            # Note: Multiple pressers may target the same receiver.
-            dists_to_receiver = np.sqrt((teammate_locs.x - receiver_x) ** 2 + (teammate_locs.y - receiver_y) ** 2)
-            presser_idx = np.argmin(dists_to_receiver)
-            expected_pressers_idx.append(presser_idx) 
-
-        distances[i, 0] = np.sqrt((start_x - target_x) ** 2 + (start_y - target_y) ** 2)
-        for j, (presser_idx, receiver_idx) in enumerate(zip(expected_pressers_idx, expected_receivers_idx)):
-            presser_x, presser_y = teammate_locs.loc[presser_idx, ["x", "y"]].values
-            receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
-
-            distances[i, j+1] = np.sqrt((presser_x - receiver_x) ** 2 + (presser_y - receiver_y) ** 2)
+    Returns
+    -------
+    pd.DataFrame
         
-    # Generate column names
-    columns = [f"teammate_opponent_distance{i}" for i in range(1, min_players+1)]
+    """
+    # 가까운 팀원 및 상대 선수 정보 가져오기
+    closest_players_data = closest_players(actions, num_players)
 
-    return pd.DataFrame(distances, index=actions.index, columns=columns)
+    actor_x = actions["start_x"]
+    actor_y = actions["start_y"]
+
+    
+    result = pd.DataFrame(index=closest_players_data.index)
+    
+    for i in range(1, num_players + 1):
+        
+        teammate_x = closest_players_data[f"teammate_{i}_x"]
+        teammate_y = closest_players_data[f"teammate_{i}_y"]
+        result[f"teammate_{i}_relative_angle"] = np.arctan2(teammate_y - actor_y, teammate_x - actor_x)
+
+        
+        opponent_x = closest_players_data[f"opponent_{i}_x"]
+        opponent_y = closest_players_data[f"opponent_{i}_y"]
+        result[f"opponent_{i}_relative_angle"] = np.arctan2(opponent_y - actor_y, opponent_x - actor_x)
+
+    return result
 
 # parameter(radius) set
-defenders_in_3m_radius = required_fields(["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"])(
-    simple(partial(_opponents_in_radius, radius=3)))
+defenders_in_3m_radius = required_fields(
+    ["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"]
+)(simple(partial(_opponents_in_radius, radius=3)))
 defenders_in_3m_radius.__name__ = "defenders_in_3m_radius"
 
 closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"])(
-   simple(partial(closest_players, num_players=3))
+    simple(partial(closest_players, num_players=3))
 )
 closest_3_players.__name__ = "closest_3_players"
 
@@ -1292,8 +1134,6 @@ all_features = [
     dist_opponent,
     defenders_in_3m_radius,
     closest_3_players,
-    extract_all_players,
-    expected_receiver_and_presser
 ]
 
 
