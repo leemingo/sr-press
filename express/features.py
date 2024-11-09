@@ -413,6 +413,92 @@ def movement(actions):
     mov['movement'] = np.sqrt(mov.dx ** 2 + mov.dy ** 2)
     return mov
 
+@required_fields(["period_id", "player_id", "type_name", "start_x", "start_y", "end_x", "end_y"])
+@simple
+def player_possession_distance(actions):
+    """Get the cumulative distance a player has covered in possession before attempting the action.
+
+    Parameters
+    ----------
+    actions : SPADLActions
+        The actions of a game.
+
+    Returns
+    -------
+    pd.DataFrame
+        The cumulative 'player_possession_distance' for each action.
+    """
+    # 현재 액션과 이전 액션 데이터를 가져옵니다.
+    cur_action = actions[["period_id", "player_id", "type_name", "start_x", "start_y", "end_x", "end_y"]]
+    prev_action = actions.shift(1)[["period_id", "player_id", "end_x", "end_y"]]
+    
+    # 현재 액션과 이전 액션을 병합하여 비교할 수 있도록 합니다.
+    df = cur_action.join(prev_action, rsuffix="_prev")
+    
+    # 동일한 선수, 동일한 기간인지 확인합니다.
+    same_player = df.player_id == df.player_id_prev
+    same_period = df.period_id == df.period_id_prev
+    
+    # 이동 거리를 초기화합니다.
+    df["movement"] = np.sqrt((df["end_x"] - df["start_x"]) ** 2 + (df["end_y"] - df["start_y"]) ** 2)
+    
+    # 선수의 소유권이 유지되는 동안 누적 거리를 계산합니다.
+    df["player_possession_distance"] = 0
+    possession_distance = 0  # 누적 거리 초기화
+    
+    for i in range(len(df)):
+        if same_player.iloc[i] and same_period.iloc[i]:  # 소유권이 유지되는 동안
+            possession_distance += df["movement"].iloc[i]  # 이동 거리를 누적
+        else:
+            possession_distance = df["movement"].iloc[i]  # 소유권이 변경되면 거리 초기화
+        df.at[i, "player_possession_distance"] = possession_distance
+
+    return df[["player_possession_distance"]]
+
+
+
+@required_fields(["period_id", "player_id", "type_name", "time_seconds"])
+@simple
+def cumulative_possession_time(actions):
+    """Get the cumulative time a player has been in possession before attempting the action.
+
+    Parameters
+    ----------
+    actions : SPADLActions
+        The actions of a game.
+
+    Returns
+    -------
+    pd.DataFrame
+        The cumulative 'cumulative_possession_time' for each action.
+    """
+    # 현재 액션과 이전 액션 데이터를 가져옵니다.
+    cur_action = actions[["period_id", "time_seconds", "player_id", "type_name"]]
+    prev_action = actions.shift(1)[["period_id", "time_seconds", "player_id"]]
+    
+    # 현재 액션과 이전 액션을 병합하여 비교할 수 있도록 합니다.
+    df = cur_action.join(prev_action, rsuffix="_prev")
+    
+    # 동일한 선수, 동일한 기간인지 확인합니다.
+    same_player = df.player_id == df.player_id_prev
+    same_period = df.period_id == df.period_id_prev
+    
+    # 소유 시간을 초기화합니다.
+    df["time_difference"] = df["time_seconds"] - df["time_seconds_prev"]
+    df["time_difference"] = df["time_difference"].where(same_player & same_period, 0)
+    
+    # 소유권 유지 동안의 누적 시간을 계산합니다.
+    df["cumulative_possession_time"] = df["time_difference"].cumsum()
+    
+    # 소유권이 변경되면 누적 시간을 초기화합니다.
+    for i in range(1, len(df)):
+        if not same_player.iloc[i] or not same_period.iloc[i]:
+            df.at[i, "cumulative_possession_time"] = 0  # 소유권 변경 시 시간 초기화
+        else:
+            df.at[i, "cumulative_possession_time"] = df.at[i - 1, "cumulative_possession_time"] + df.at[i, "time_difference"]
+    
+    return df[["cumulative_possession_time"]].fillna(0)
+
 @required_fields(["team_id"])
 # @fs.simple: STATE FEATURES
 def team(gamestates):
@@ -681,6 +767,7 @@ def player_possession_time(actions):
         df.loc[mask, "time_seconds"] - df.loc[mask, "time_seconds_prev"]
     )
     return df[["player_possession_time"]].fillna(0)
+
 
 @required_fields(["extra"])
 @simple
