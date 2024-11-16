@@ -44,7 +44,7 @@ def concede_shots(actions: pd.DataFrame, nr_actions: int = 10) -> pd.DataFrame:
         gi = y["shot+%d" % i] & (y["team_id+%d" % i] != y["team_id"]) # presser과 다른 팀의 선수가 슛을 성공하면
         res = res | gi
 
-    return pd.DataFrame(res, columns=["shots"])
+    return pd.DataFrame(res, columns=["concede_shots"])
 
 # P(G+|St,pt) if the defending team successfully recovers the ball
 def counterpress(actions: pd.DataFrame) -> pd.DataFrame:
@@ -94,21 +94,16 @@ def get_labels(
     pd.DataFrame
         A dataframe with the labels.
     """
-    game_actions = add_names(db.actions(game_id))
+    game_actions = add_names(db.actions(game_id)).reset_index()
     if actionfilter is None:
         idx = pd.Series([True] * len(game_actions), index=game_actions.index)
     else:
         idx = actionfilter(game_actions)
-    try:
-        df_labels = pd.concat(
-            # TODO: move .set_index to socceraction label generators
-            [fn(game_actions.reset_index()).set_index(game_actions.index).loc[idx] for fn in yfns],
-            axis=1,
-        )
-    except Exception:
-        df_labels = pd.concat(
-            # TODO: move .set_index to socceraction label generators
-            [fn(game_actions).loc[idx] for fn in yfns],
-            axis=1,
-        )
+
+    df_labels = pd.concat(
+        # TODO: move .set_index to socceraction label generators
+        [fn(game_actions).loc[idx] for fn in yfns],
+        axis=1,
+    )
+
     return df_labels
