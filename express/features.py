@@ -651,37 +651,6 @@ def under_pressure(actions):
     """
     return actions[["under_pressure"]].fillna(False)
 
-
-@required_fields(["period_id", "time_seconds", "player_id", "type_name"])
-@simple
-def player_possession_time(actions):
-    """Get the time (sec) a player was in ball possession before attempting the action.
-
-    We only look at the dribble preceding the action and reset the possession
-    time after a defensive interception attempt or a take-on.
-
-    Parameters
-    ----------
-    actions : SPADLActions
-        The actions of a game.
-
-    Returns
-    -------
-    Features
-        The 'player_possession_time' of each action.
-    """
-    cur_action = actions[["period_id", "time_seconds", "player_id", "type_name"]]
-    prev_action = actions.shift(1)[["period_id", "time_seconds", "player_id", "type_name"]]
-    df = cur_action.join(prev_action, rsuffix="_prev")
-    same_player = df.player_id == df.player_id_prev
-    same_period = df.period_id == df.period_id_prev
-    prev_dribble = df.type_name_prev == "dribble"
-    mask = same_period & same_player & prev_dribble
-    df.loc[mask, "player_possession_time"] = (
-        df.loc[mask, "time_seconds"] - df.loc[mask, "time_seconds_prev"]
-    )
-    return df[["player_possession_time"]].fillna(0)
-
 @required_fields(["extra"])
 @simple
 def ball_height_onehot(actions):
@@ -993,7 +962,6 @@ def dist_opponent(actions):
         columns=["dist_defender_start", "dist_defender_end", "dist_defender_action"],
     )
 
-@required_fields(["freeze_frame_360", "start_x", "start_y"])
 def closest_players(actions, num_players=3):
     """For each action, find the n closest teammates and n closest opponents to the action's location.
 
@@ -1006,34 +974,33 @@ def closest_players(actions, num_players=3):
     Returns:
     - DataFrame: Contains x, y, and distance for each of the closest teammates and opponents.
     """
-
-    cloeset_teammates_xy = np.zeros((len(actions), num_players*3), dtype=float) # x, y, distance for each player
-    cloeset_opponents_xy = np.zeros((len(actions), num_players*3), dtype=float) # x, y, distance for each player
-    for i, (_, action) in enumerate(actions.iterrows()):
-        if not action["freeze_frame_360"]:
+    # Get the n closest teammates and opponents
+    num_teammates = num_players if num_players < 11 else 10 # Exclude event player
+    num_opponents = num_players
+    cloeset_teammates_xy = np.full((len(actions), num_teammates*3), np.nan, dtype=float) # x, y, distance for each teammate player
+    cloeset_opponents_xy = np.full((len(actions), num_opponents*3), np.nan, dtype=float) # x, y, distance for each opponent player
+    
+    for i, action in enumerate(actions.itertuples(index=False)):
+        if not action.freeze_frame_360:
             continue
-
-        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
+        
+        freeze_frame = pd.DataFrame.from_records(action.freeze_frame_360)
         start_x, start_y = action.start_x, action.start_y
-        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].copy()
+        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].copy() # Exclude event player
         opponent_locs = freeze_frame[~freeze_frame.teammate].copy()
 
-        teammate_locs['distance'] = np.sqrt((teammate_locs['x'] - start_x) ** 2 + (teammate_locs['y'] - start_y) ** 2)
-        opponent_locs['distance'] = np.sqrt((opponent_locs['x'] - start_x) ** 2 + (opponent_locs['y'] - start_y) ** 2)
-
-        # Get the n closest teammates and opponents
-        num_teammates = min(num_players, len(teammate_locs))
-        num_opponents = min(num_players, len(opponent_locs))
+        teammate_locs['distance'] = np.hypot(teammate_locs.x - start_x, teammate_locs.y - start_y)
+        opponent_locs['distance'] = np.hypot(opponent_locs.x - start_x, opponent_locs.y - start_y)
 
         closest_teammates_df = teammate_locs.nsmallest(num_teammates, 'distance')[['x', 'y', 'distance']]
         closest_opponents_df = opponent_locs.nsmallest(num_opponents, 'distance')[['x', 'y', 'distance']]
 
-        for j in range(num_teammates):
+        for j in range(len(closest_teammates_df)):
             cloeset_teammates_xy[i, j * 3] = closest_teammates_df.iloc[j]['x']
             cloeset_teammates_xy[i, j * 3 + 1] = closest_teammates_df.iloc[j]['y']
             cloeset_teammates_xy[i, j * 3 + 2] = closest_teammates_df.iloc[j]['distance']
 
-        for j in range(num_opponents):
+        for j in range(len(closest_opponents_df)):
             cloeset_opponents_xy[i, j * 3] = closest_opponents_df.iloc[j]['x']
             cloeset_opponents_xy[i, j * 3 + 1] = closest_opponents_df.iloc[j]['y']
             cloeset_opponents_xy[i, j * 3 + 2] = closest_opponents_df.iloc[j]['distance']
@@ -1043,91 +1010,28 @@ def closest_players(actions, num_players=3):
 
     # Generate column names dynamically
     columns = []
-    for k in range(1, num_players + 1):
+    for k in range(1, num_teammates + 1):
         columns.extend([f"teammate_{k}_x", f"teammate_{k}_y", f"teammate_{k}_distance"])
-    for k in range(1, num_players + 1):
+    for k in range(1, num_opponents + 1):
         columns.extend([f"opponent_{k}_x", f"opponent_{k}_y", f"opponent_{k}_distance"])
 
     return pd.DataFrame(cloeset_xy, index=actions.index, columns=columns)
 
 @required_fields(["freeze_frame_360", "start_x", "start_y"])
-@simple
-def extract_all_players(actions):
-    """
-    Extracts the location and distance of all teammates and opponents captured in each action's freeze_frame_360 data.
-    If there are fewer players than the total number expected (10 teammates and 11 opponents), missing values are filled with NaN.
+def expected_receiver_and_presser_by_distance(actions, min_players=3):
+    distances = np.full((len(actions), min_players*2), np.nan, dtype=float)
+    angles = np.full((len(actions), min_players*2), np.nan, dtype=float)
 
-    Parameters
-    ----------
-    actions : SPADLActions
-        The actions of a game.
-    num_players (int): Number of closest teammates and opponents to find for each action.
-
-    Returns:
-    - DataFrame: Contains x, y, and distance for each of the closest teammates and opponents.
-    """
-
-    MAX_TEAMMATES = 10 # exclude event player
-    MAX_OPPONENTS = 11
-    all_teammates_xy = np.full((len(actions), MAX_TEAMMATES * 3), np.nan, dtype=float)  # x, y, distance for each player
-    all_opponents_xy = np.full((len(actions), MAX_OPPONENTS * 3), np.nan, dtype=float)  # x, y, distance for each player
-    
-    for i, (_, action) in enumerate(actions.iterrows()):
-        if not action["freeze_frame_360"]:
+    for i, action in enumerate(actions.itertuples(index=False)):
+        if not action.freeze_frame_360:
             continue
         
-        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
-        start_x, start_y = action.start_x, action.start_y
-        teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].copy() # exclude event player
-        opponent_locs = freeze_frame[~freeze_frame.teammate].copy()
-
-        # Sort by distance
-        teammate_locs['distance'] = np.sqrt((teammate_locs['x'] - start_x) ** 2 + (teammate_locs['y'] - start_y) ** 2)
-        opponent_locs['distance'] = np.sqrt((opponent_locs['x'] - start_x) ** 2 + (opponent_locs['y'] - start_y) ** 2)
-        num_teammates = len(teammate_locs)
-        num_opponents = len(opponent_locs)
-
-        closest_teammates_df = teammate_locs.nsmallest(num_teammates, 'distance')[['x', 'y', 'distance']]
-        closest_opponents_df = opponent_locs.nsmallest(num_opponents, 'distance')[['x', 'y', 'distance']]
- 
-        for j in range(num_teammates):
-            all_teammates_xy[i, j * 3] = closest_teammates_df.iloc[j]['x']
-            all_teammates_xy[i, j * 3 + 1] = closest_teammates_df.iloc[j]['y']
-            all_teammates_xy[i, j * 3 + 2] = closest_teammates_df.iloc[j]['distance']
-
-        for j in range(num_opponents):
-            all_opponents_xy[i, j * 3] = closest_opponents_df.iloc[j]['x']
-            all_opponents_xy[i, j * 3 + 1] = closest_opponents_df.iloc[j]['y']
-            all_opponents_xy[i, j * 3 + 2] = closest_opponents_df.iloc[j]['distance']
-
-    # Combine teammate and opponent data
-    all_player_xy = np.hstack((all_teammates_xy, all_opponents_xy))
-
-    # Generate column names
-    columns = []
-    for k in range(1, MAX_TEAMMATES + 1):
-        columns.extend([f"teammate_{k}_x", f"teammate_{k}_y", f"teammate_{k}_distance"])
-    for k in range(1, MAX_OPPONENTS + 1):
-        columns.extend([f"opponent_{k}_x", f"opponent_{k}_y", f"opponent_{k}_distance"])
-
-    return pd.DataFrame(all_player_xy, index=actions.index, columns=columns)
-
-@required_fields(["freeze_frame_360", "start_x", "start_y"])
-@simple
-def expected_receiver_and_presser(actions, min_players=3):
-    distances = np.full((len(actions), min_players*2 - 1), np.nan, dtype=float)
-    angles = np.full((len(actions), min_players*2 - 1), np.nan, dtype=float)
-    
-    for i, (_, action) in enumerate(actions.iterrows()):  
-        if not action["freeze_frame_360"]:
-            continue
-
-        freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
+        freeze_frame = pd.DataFrame.from_records(action.freeze_frame_360)
         start_x, start_y = action.start_x, action.start_y
         teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor & ~freeze_frame.keeper].reset_index(drop=True) # Exclude event player
         opponent_locs = freeze_frame[~freeze_frame.teammate & ~freeze_frame.keeper].reset_index(drop=True)
 
-        if (len(teammate_locs) < min_players-1) or (len(opponent_locs) < min_players):
+        if (len(teammate_locs) < min_players) or (len(opponent_locs) < min_players):
             continue
         
         # Calculate the closest opponent to the start location(presser)
@@ -1138,13 +1042,13 @@ def expected_receiver_and_presser(actions, min_players=3):
        
         # expected-receiver
         dists_to_target = np.hypot(opponent_locs.x - target_x, opponent_locs.y - target_y)
-        expected_receivers_idx = np.argsort(dists_to_target)[1:min_players] # Exclude the target itself
-        expected_receivers_locs = opponent_locs.loc[expected_receivers_idx, ["x", "y"]].values
+        expected_receiver_idxs = np.argsort(dists_to_target)[:min_players] # Include the target itself
+        expected_receivers_locs = opponent_locs.loc[expected_receiver_idxs, ["x", "y"]].values
 
         # expected-presser
         expected_pressers_idx = []
-        for receiver_idx in expected_receivers_idx:
-            receiver_x, receiver_y = opponent_locs.loc[receiver_idx, ["x", "y"]].values
+        for expected_receiver_idx in expected_receiver_idxs:
+            receiver_x, receiver_y = opponent_locs.loc[expected_receiver_idx, ["x", "y"]].values
 
             # Note: Multiple pressers may target the same receiver.
             dists_to_receiver = np.hypot(teammate_locs.x - receiver_x, teammate_locs.y - receiver_y)
@@ -1153,28 +1057,23 @@ def expected_receiver_and_presser(actions, min_players=3):
             expected_pressers_idx.append(presser_idx) 
         expected_presser_locs = teammate_locs.iloc[expected_pressers_idx][["x", "y"]].values
 
-        # Compute distances and angles between presser and target
-        distances[i, 0] = np.hypot(target_x - start_x, target_y - start_y)
-        angles[i, 0] = np.arctan2(target_x - start_x, target_y - start_y)
-
         # Compute distances and angles between presser and expected receivers
-        distances[i, 1:min_players] = np.hypot(expected_receivers_locs[:, 0] - start_x, expected_receivers_locs[:, 1] - start_y)
-        angles[i, 1:min_players] = np.arctan2(expected_receivers_locs[:, 0] - start_x, expected_receivers_locs[:, 1] - start_y)
+        distances[i, :min_players] = np.hypot(expected_receivers_locs[:, 0] - start_x, expected_receivers_locs[:, 1] - start_y)
+        angles[i, :min_players] = np.arctan2(expected_receivers_locs[:, 0] - start_x, expected_receivers_locs[:, 1] - start_y)
 
         # Compute distances and angles between presser and expected presser
         distances[i, min_players:] = np.hypot(expected_presser_locs[:, 0] - start_x, expected_presser_locs[:, 1] - start_y)
         angles[i, min_players:] = np.arctan2(expected_presser_locs[:, 0] - start_x, expected_presser_locs[:, 1] - start_y)
 
     distance_columns = (
-        ["distance_to_target"]
-        + [f"distance_to_expected_receiver{idx}" for idx in range(1, min_players)]
-        + [f"distance_to_expected_presser{idx}" for idx in range(1, min_players)]
+        [f"distance_to_expected_receiver{idx}" for idx in range(1, min_players+1)]
+        + [f"distance_to_expected_presser{idx}" for idx in range(1, min_players+1)]
     )
     angle_columns = (
-        ["angle_to_target"]
-        + [f"angle_to_expected_receiver{idx}" for idx in range(1, min_players)]
-        + [f"angle_to_expected_presser{idx}" for idx in range(1, min_players)]
+        [f"angle_to_expected_receiver{idx}" for idx in range(1, min_players+1)]
+        + [f"angle_to_expected_presser{idx}" for idx in range(1, min_players+1)]
     )
+
     # Create DataFrames for distances and angles
     distances_df = pd.DataFrame(distances, index=actions.index, columns=distance_columns)
     angles_df = pd.DataFrame(angles, index=actions.index, columns=angle_columns)
@@ -1186,10 +1085,13 @@ defenders_in_3m_radius = required_fields(["start_x", "start_y", "end_x", "end_y"
     simple(partial(_opponents_in_radius, radius=3)))
 defenders_in_3m_radius.__name__ = "defenders_in_3m_radius"
 
-closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"])(
-   simple(partial(closest_players, num_players=3))
-)
+closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"]
+)(simple(partial(closest_players, num_players=3)))  # parameter: num_players=3
 closest_3_players.__name__ = "closest_3_players"
+
+expected_3_receiver_and_presser_by_distance = required_fields(["freeze_frame_360", "start_x", "start_y"])(
+   simple(partial(expected_receiver_and_presser_by_distance, min_players=3)))  # parameter: num_players=3
+expected_3_receiver_and_presser_by_distance.__name__ = "expected_3_receiver_and_presser_by_distance"
 
 all_features = [
     actiontype,
@@ -1220,14 +1122,12 @@ all_features = [
     packing_rate,
     ball_height_onehot,
 
-    player_possession_time,
     speed,
     nb_opp_in_path,
     dist_opponent,
     defenders_in_3m_radius,
     closest_3_players,
-    extract_all_players,
-    expected_receiver_and_presser
+    expected_3_receiver_and_presser_by_distance
 ]
 
 
@@ -1260,7 +1160,7 @@ def get_features(
     """
     # retrieve actions from database
     
-    actions = add_names(db.actions(game_id))
+    actions = add_names(db.actions(game_id)).reset_index()
 
     # filter actions of interest
     if actionfilter is None:
@@ -1270,22 +1170,24 @@ def get_features(
 
     # check if we have to return an empty dataframe
     if idx.sum() < 1:
-        column_names = feature_column_names(xfns, nb_prev_actions)
+        column_names = []
+        for fn in xfns:
+            column_names.extend(feature_column_names([fn], nb_prev_actions))
         return pd.DataFrame(columns=column_names)
-    
+
     if len(xfns) < 1:
         return pd.DataFrame(index=actions.index.values[idx])
-    
     
     # convert actions to gamestates
     home_team_id, _ = db.get_home_away_team_id(game_id)
 
     states = play_left_to_right(gamestates(actions, nb_prev_actions), home_team_id)
+    states = [state.loc[idx].copy() for state in states]
 
     # compute features
     df_features = reduce(
         lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
-        (fn(states).loc[idx] for fn in xfns),
+        (fn(states) for fn in xfns),
     )
 
     return df_features
