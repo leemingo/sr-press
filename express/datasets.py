@@ -1,4 +1,4 @@
-"""A dataset containing all pressing."""
+"""A dataset containing all pressing actions."""
 import os
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
@@ -102,7 +102,7 @@ class PressingDataset(Dataset):
             if parsed_cols is None:
                 parsed_cols = features.feature_column_names([parsed_xfn], nb_prev_actions=self.nb_prev_actions)
             parsed_xfns[parsed_xfn] = parsed_cols
-        
+
         return parsed_xfns
     
     # The @staticmethod decorator is removed to access `nb_prev_actions` from the PressingDataset instance.
@@ -129,16 +129,18 @@ class PressingDataset(Dataset):
         is_pressing = (actions.type_id == config.actiontypes.index("pressing"))  # pressing
         is_visible_area_360 = actions["visible_area_360"].notna()  # visible_area_360
 
+        play_pattern = (actions["play_pattern_name"] == "From Goal Kick")
+
         # Check if freeze_frame_360 has at least 3 teammates and 3 opponents
         has_required_players = actions["freeze_frame_360"].apply(lambda frame: (
             frame is not None and
-            sum(player["teammate"] for player in frame) >= self.min_players and
-            sum(not player["teammate"] for player in frame) >= self.min_players
+            sum(player["teammate"] and not player["actor"] and not player["keeper"] for player in frame) >= self.min_players and
+            sum(not player["teammate"] and not player["keeper"] for player in frame) >= self.min_players
         ))
 
         # Ensure the action starts in the attacking third
         in_attacking_third = actions["start_x"] > config.field_length * (2 / 3)
-        return is_pressing & is_visible_area_360 & has_required_players & in_attacking_third
+        return is_pressing & is_visible_area_360 & has_required_players & in_attacking_third & play_pattern
 
     def create(self, db) -> None:
         """Create the dataset.
@@ -158,46 +160,42 @@ class PressingDataset(Dataset):
         # Compute features for each pressing
         if len(self.xfns):
             df_features = []
-            for xfn, _ in self.xfns.items():
-                df_features_xfn = []
-                for game_id in track(self.games_idx, description=f"Computing {xfn.__name__} feature"):
-                    df_features_xfn.append(
-                        features.get_features(
-                            db,
-                            game_id=game_id,
-                            xfns=[xfn],
-                            nb_prev_actions=self.nb_prev_actions,
-                            actionfilter=self.actionfilter,
-                        )
+            for game_id in track(self.games_idx):
+                pressure_features = features.get_features(
+                        db,
+                        game_id=game_id,
+                        xfns=self.xfns.keys(),
+                        nb_prev_actions=self.nb_prev_actions,
+                        actionfilter=self.actionfilter,
                     )
                 
-                df_features_xfn = pd.concat(df_features_xfn)
-                if self.store is not None:
-                    assert self.store is not None
-                    df_features_xfn.to_parquet(self.store / f"x_{xfn.__name__}.parquet")
-                df_features.append(df_features_xfn)
-            self._features = pd.concat(df_features, axis=1)
+                if not pressure_features.empty:
+                    df_features.append(pressure_features)
+            self._features = pd.concat(df_features, axis=0, ignore_index=True)
 
         # Compute labels for each pass
         if len(self.yfns):
             df_labels = []
-            for yfn in self.yfns:
-                df_labels_yfn = []
-                for game_id in track(self.games_idx, description=f"Computing {yfn.__name__} label"):
-                    df_labels_yfn.append(
-                        labels.get_labels(
-                            db,
-                            game_id=game_id,
-                            yfns=[yfn],
-                            actionfilter=self.actionfilter,
-                        )
+            for game_id in track(self.games_idx):
+                df_labels.append(
+                    labels.get_labels(
+                        db,
+                        game_id=game_id,
+                        yfns=self.yfns,
+                        actionfilter=self.actionfilter,
                     )
-                df_labels_yfn = pd.concat(df_labels_yfn)
-                if self.store is not None:
-                    df_labels_yfn.to_parquet(self.store / f"y_{yfn.__name__}.parquet")
-                df_labels.append(df_labels_yfn)
-            self._labels = pd.concat(df_labels, axis=1)
+                )
+            self._labels = pd.concat(df_labels, axis=0, ignore_index=True)
 
+        if self.store is not None:
+            assert self.store is not None
+            
+            for xfn, col in self.xfns.items():           
+                self._features[col].to_parquet(self.store / f"x_{xfn.__name__}.parquet")
+
+            for yfn in self.yfns:
+                self._labels[[yfn.__name__]].to_parquet(self.store / f"y_{yfn.__name__}.parquet")
+         
     @property
     def features(self):
         if self._features is None:
