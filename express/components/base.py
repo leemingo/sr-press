@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-import xgboost as xgb
+from xgboost import XGBClassifier, XGBRegressor
 from gplearn.genetic import SymbolicClassifier
 from rich.progress import track
 from sklearn.model_selection import cross_val_score, train_test_split
@@ -87,20 +87,17 @@ class expressXGBoostComponent(exPressComponent):
     def test(self, dataset) -> Dict[str, float]:
         data = self.initialize_dataset(dataset)
         X_test, y_test = data.features, data.labels
-        if isinstance(self.model, xgb.XGBClassifier):
+        if isinstance(self.model, XGBClassifier):
             y_hat = self.model.predict_proba(X_test)[:, 1]
-        elif isinstance(self.model, xgb.XGBRegressor):
-            y_hat = self.model.predict(X_test)
         else:
             raise AttributeError(f"Unsupported xgboost model: {type(self.model)}")
+        
         return self._get_metrics(y_test, y_hat)
 
     def predict(self, dataset) -> pd.Series:
         data = self.initialize_dataset(dataset)
-        if isinstance(self.model, xgb.XGBClassifier):
+        if isinstance(self.model, XGBClassifier):
             y_hat = self.model.predict_proba(data.features)[:, 1]
-        elif isinstance(self.model, xgb.XGBRegressor):
-            y_hat = self.model.predict(data.features)
         else:
             raise AttributeError(f"Unsupported xgboost model: {type(self.model)}")
         return pd.Series(y_hat, index=data.features.index)
@@ -133,8 +130,6 @@ class expressSymbolicComponent(exPressComponent):
         X_test, y_test = data.features, data.labels
         if isinstance(self.model, SymbolicClassifier):
             y_hat = self.model.predict_proba(X_test)[:, 1]
-        elif isinstance(self.model, SymbolicClassifier):
-            y_hat = self.model.predict(X_test)
         else:
             raise AttributeError(f"Unsupported Symbolic model: {type(self.model)}")
         return self._get_metrics(y_test, y_hat)
@@ -143,8 +138,6 @@ class expressSymbolicComponent(exPressComponent):
         data = self.initialize_dataset(dataset)
         if isinstance(self.model, SymbolicClassifier):
             y_hat = self.model.predict_proba(data.features)[:, 1]
-        elif isinstance(self.model, SymbolicClassifier):
-            y_hat = self.model.predict(data.features)
         else:
             raise AttributeError(f"Unsupported Symbolic model: {type(self.model)}")
         return pd.Series(y_hat, index=data.features.index)

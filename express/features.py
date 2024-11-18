@@ -1089,6 +1089,10 @@ closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"]
 )(simple(partial(closest_players, num_players=3)))  # parameter: num_players=3
 closest_3_players.__name__ = "closest_3_players"
 
+closest_11_players = required_fields(["freeze_frame_360", "start_x", "start_y"]
+)(simple(partial(closest_players, num_players=11)))  # parameter: num_players=11
+closest_11_players.__name__ = "closest_11_players"
+
 expected_3_receiver_and_presser_by_distance = required_fields(["freeze_frame_360", "start_x", "start_y"])(
    simple(partial(expected_receiver_and_presser_by_distance, min_players=3)))  # parameter: num_players=3
 expected_3_receiver_and_presser_by_distance.__name__ = "expected_3_receiver_and_presser_by_distance"
@@ -1127,6 +1131,7 @@ all_features = [
     dist_opponent,
     defenders_in_3m_radius,
     closest_3_players,
+    closest_11_players,
     expected_3_receiver_and_presser_by_distance
 ]
 

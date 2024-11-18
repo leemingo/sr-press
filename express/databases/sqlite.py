@@ -111,6 +111,7 @@ class SQLiteDatabase(Database):
             possession_team_id INTEGER,
             play_pattern_name TEXT,
             under_pressure BOOLEAN,
+            duration REAL, 
             extra TEXT,
             visible_area_360 TEXT,
             in_visible_area_360 BOOLEAN,
@@ -168,7 +169,7 @@ class SQLiteDatabase(Database):
         actions["freeze_frame_360"] = actions["freeze_frame_360"].apply(json.dumps).astype("str")
         
         self.cursor.executemany(
-            "REPLACE INTO actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
+            "REPLACE INTO actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
             actions[TABLE_ACTIONS].itertuples(index=False),
         )
         self.conn.commit()

@@ -76,6 +76,7 @@ TABLE_ACTIONS = [
     "possession_team_id",
     "play_pattern_name",
     "under_pressure",
+    "duration",
     "extra",
     "visible_area_360",
     "in_visible_area_360",
@@ -111,6 +112,7 @@ def _sb_events_to_spadl(events: pd.DataFrame, home_team_id: int) -> pd.DataFrame
                 "possession_team_id",
                 "play_pattern_name",
                 "under_pressure",
+                "duration",
                 "extra",
                 "visible_area_360",
                 "freeze_frame_360",
@@ -120,6 +122,9 @@ def _sb_events_to_spadl(events: pd.DataFrame, home_team_id: int) -> pd.DataFrame
         how="left",
     )
     actions["under_pressure"] = actions["under_pressure"].fillna(False)
+    # unit: Ensure the "duration" column is in timedelta format using seconds as the unit
+    actions["duration"] = pd.to_timedelta(actions["duration"].fillna(0.0), unit="s").dt.total_seconds()
+
     # convert coordinates in freeze frames to SPADL coordinates
     actions["visible_area_360"] = actions.assign(away_idx=(actions.team_id != home_team_id)).apply(
         lambda x: _sb_visible_area_to_spadl(x.visible_area_360, x.away_idx), axis=1
@@ -335,7 +340,7 @@ class Database(ABC):
             competitions = competitions[competitions.competition_id == competition_id]
         if season_id is not None:
             competitions = competitions[competitions.season_id == season_id]
-
+ 
         # Store competitions
         self._import_competitions(competitions)
 
@@ -346,14 +351,17 @@ class Database(ABC):
                 for row in competitions.itertuples()
             ]
         )
+        
         if game_id is not None:
             games = games[games.game_id == game_id]
+
         if games.empty:
             raise ValueError("No games found with given criteria.")
 
         # Load and convert match data
         # games_verbose = track(list(games.itertuples()), description="Loading game data...")
         games_verbose = list(games.itertuples())
+
         teams, players = [], []
         for game in games_verbose:
             try:

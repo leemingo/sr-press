@@ -1,4 +1,4 @@
-"""A dataset containing all pressing actions."""
+"""A dataset containing all pressing."""
 import os
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
@@ -38,12 +38,10 @@ class PressingDataset(Dataset):
         path: Optional[os.PathLike[str]] = None, 
         load_cached: bool = True,
         nb_prev_actions: int = 1,
-        min_players: int = None,
     ):
 
         # Check requested features and labels
         self.nb_prev_actions = nb_prev_actions
-        self.min_players = min_players
         self.transform = transform
 
         self.xfns = self._parse_xfns(xfns)
@@ -129,18 +127,7 @@ class PressingDataset(Dataset):
         is_pressing = (actions.type_id == config.actiontypes.index("pressing"))  # pressing
         is_visible_area_360 = actions["visible_area_360"].notna()  # visible_area_360
 
-        play_pattern = (actions["play_pattern_name"] == "From Goal Kick")
-
-        # Check if freeze_frame_360 has at least 3 teammates and 3 opponents
-        has_required_players = actions["freeze_frame_360"].apply(lambda frame: (
-            frame is not None and
-            sum(player["teammate"] and not player["actor"] and not player["keeper"] for player in frame) >= self.min_players and
-            sum(not player["teammate"] and not player["keeper"] for player in frame) >= self.min_players
-        ))
-
-        # Ensure the action starts in the attacking third
-        in_attacking_third = actions["start_x"] > config.field_length * (2 / 3)
-        return is_pressing & is_visible_area_360 & has_required_players & in_attacking_third & play_pattern
+        return is_pressing & is_visible_area_360
 
     def create(self, db) -> None:
         """Create the dataset.
@@ -156,7 +143,7 @@ class PressingDataset(Dataset):
 
         # Select games to include
         self.games_idx = list(db.games().index)
-
+    
         # Compute features for each pressing
         if len(self.xfns):
             df_features = []
@@ -168,9 +155,10 @@ class PressingDataset(Dataset):
                         nb_prev_actions=self.nb_prev_actions,
                         actionfilter=self.actionfilter,
                     )
-                
+
                 if not pressure_features.empty:
                     df_features.append(pressure_features)
+
             self._features = pd.concat(df_features, axis=0, ignore_index=True)
 
         # Compute labels for each pass
@@ -185,6 +173,7 @@ class PressingDataset(Dataset):
                         actionfilter=self.actionfilter,
                     )
                 )
+
             self._labels = pd.concat(df_labels, axis=0, ignore_index=True)
 
         if self.store is not None:
