@@ -5,6 +5,7 @@ from typing import Callable, Dict, List, Optional, Union
 
 import pandas as pd
 from rich.progress import track
+from tqdm import tqdm
 from torch.utils.data import Dataset
 
 import express.config as config
@@ -147,7 +148,7 @@ class PressingDataset(Dataset):
         # Compute features for each pressing
         if len(self.xfns):
             df_features = []
-            for game_id in track(self.games_idx):
+            for game_id in tqdm(self.games_idx):
                 pressure_features = features.get_features(
                         db,
                         game_id=game_id,
@@ -158,13 +159,13 @@ class PressingDataset(Dataset):
 
                 if not pressure_features.empty:
                     df_features.append(pressure_features)
-
-            self._features = pd.concat(df_features, axis=0, ignore_index=True)
+                
+            self._features = pd.concat(df_features, axis=0, ignore_index=False)
 
         # Compute labels for each pass
         if len(self.yfns):
             df_labels = []
-            for game_id in track(self.games_idx):
+            for game_id in tqdm(self.games_idx):
                 df_labels.append(
                     labels.get_labels(
                         db,
@@ -174,7 +175,7 @@ class PressingDataset(Dataset):
                     )
                 )
 
-            self._labels = pd.concat(df_labels, axis=0, ignore_index=True)
+            self._labels = pd.concat(df_labels, axis=0, ignore_index=False)
 
         if self.store is not None:
             assert self.store is not None

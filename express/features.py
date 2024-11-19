@@ -621,6 +621,26 @@ def speed(gamestates):
         speed["speed_a0" + (str(i + 1))] = np.sqrt(dx**2 + dy**2) / dt
     return speed
 
+@required_fields(["freeze_frame_360"])
+@simple
+def freeze_frame_360(actions):
+    """Get the raw StatsBomb 360 freeze frame.
+
+    Parameters
+    ----------
+    actions : SPADLActions
+        The actions of a game.
+
+    Returns
+    -------
+    Features
+        The 'freeze_frame_360' of each action.
+    """
+    if "freeze_frame_360" not in actions.columns:
+        df = pd.DataFrame(index=actions.index)
+        df["freeze_frame_360"] = None
+        return df
+    return actions[["freeze_frame_360"]]
 
 @required_fields(["under_pressure"])
 @simple
@@ -1127,6 +1147,7 @@ all_features = [
     ball_height_onehot,
 
     speed,
+    freeze_frame_360,
     nb_opp_in_path,
     dist_opponent,
     defenders_in_3m_radius,
@@ -1172,14 +1193,16 @@ def get_features(
         idx = pd.Series([True] * len(actions), index=actions.index)
     else:
         idx = actionfilter(actions)
-
+        
     # check if we have to return an empty dataframe
     if idx.sum() < 1:
         column_names = []
         for fn in xfns:
             column_names.extend(feature_column_names([fn], nb_prev_actions))
         return pd.DataFrame(columns=column_names)
-
+    else:
+        pressure_index = actions.loc[idx, ["game_id", "action_id"]].set_index(['game_id', 'action_id']).index
+        
     if len(xfns) < 1:
         return pd.DataFrame(index=actions.index.values[idx])
     
@@ -1195,4 +1218,4 @@ def get_features(
         (fn(states) for fn in xfns),
     )
 
-    return df_features
+    return df_features.set_index(pressure_index)

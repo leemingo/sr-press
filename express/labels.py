@@ -100,10 +100,16 @@ def get_labels(
     else:
         idx = actionfilter(game_actions)
 
+    # check if we have to return an empty dataframe
+    if idx.sum() < 1:
+        return pd.DataFrame(columns=yfns)
+    else:
+        pressure_index = game_actions.loc[idx, ["game_id", "action_id"]].set_index(['game_id', 'action_id']).index
+
     df_labels = pd.concat(
         # TODO: move .set_index to socceraction label generators
         [fn(game_actions).loc[idx] for fn in yfns],
         axis=1,
     )
 
-    return df_labels
+    return df_labels.set_index(pressure_index)
