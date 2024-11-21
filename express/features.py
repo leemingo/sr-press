@@ -175,6 +175,8 @@ def actiontype(actions):
     Features
         The 'type_id' of each action.
     """
+
+
     return pd.DataFrame(actions["type_id"])
 
 @required_fields(["type_name"])
@@ -1120,7 +1122,7 @@ def expected_receiver_and_presser(actions, min_players=3):
     for i, (_, action) in enumerate(actions.iterrows()):
         if not action["freeze_frame_360"]:
             continue
-
+        print(action)
         freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
         start_x, start_y = action.start_x, action.start_y
         teammate_locs = freeze_frame[freeze_frame.teammate & ~freeze_frame.actor].reset_index(drop=True) # Exclude event player
@@ -1160,38 +1162,39 @@ def expected_receiver_and_presser(actions, min_players=3):
 
     return pd.DataFrame(distances, index=actions.index, columns=columns)
 
-
 class SectorAnalysis:
-    def __init__(self, freeze_frame, angle=45, player_idx=0):
+    def __init__(self, ball_x, ball_y, freeze_frame, angle=45, player_idx=0,visualize=False):
         self.freeze_frame = freeze_frame
-        self.angle = angle
-        self.actor = next(player for player in freeze_frame if player['actor'])
-        
-        if not freeze_frame[player_idx]['teammate']:
-            raise ValueError("Selected player is not a valid teammate.")
-                
-        self.teammate = freeze_frame[player_idx]
+        self.angle = angle        
+        self.player_idx = player_idx
+
+        self.teammate = freeze_frame[player_idx]        
+        self.visualize = visualize
         self.opponents_in_sector = []
         self.Z = None
+        self.ball_x = ball_x
+        self.ball_y = ball_y
+        
 
     def calculate_opponents_in_sector(self):
         # 부채꼴 내 상대 선수 필터링 및 거리와 각도 계산
-        actor_x, actor_y = self.actor['x'], self.actor['y']
-        baseline_angle = np.arctan2(self.teammate['y'] - actor_y, self.teammate['x'] - actor_x)
-        distance = ((self.teammate['x'] - actor_x) ** 2 + (self.teammate['y'] - actor_y) ** 2) ** 0.5
 
+        baseline_angle = np.arctan2(self.teammate['y'] - self.ball_y, self.teammate['x'] - self.ball_x)
+        distance = ((self.teammate['x'] - self.ball_x) ** 2 + (self.teammate['y'] - self.ball_y) ** 2) ** 0.5
+        
         for player in self.freeze_frame:
-            if not player['teammate']:  # 상대 선수만 필터링
+            if player['teammate']:  # 상대 선수만 필터링
                 px, py = player['x'], player['y']
-                angle_to_player = np.arctan2(py - actor_y, px - actor_x)
-                angle_diff = angle_to_player - baseline_angle
+                angle_to_player = np.arctan2(py - self.ball_y, px - self.ball_x)
+                angle_diff = baseline_angle - angle_to_player
                 angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
 
                 # 부채꼴 안에 있는 선수 필터링
                 if abs(angle_diff) <= np.radians(self.angle / 2):
-                    dist_to_player = np.sqrt((px - actor_x) ** 2 + (py - actor_y) ** 2)
+                    dist_to_player = np.sqrt((px - self.ball_x) ** 2 + (py - self.ball_y) ** 2)
                     if dist_to_player <= distance:
                         self.opponents_in_sector.append((angle_diff, dist_to_player))
+
 
     def calculate_gaussian_distribution(self, sigma_x=0.2, sigma_y=3):
         # 각도와 거리 데이터를 기반으로 가우시안 분포 계산 후 그리드에 누적
@@ -1201,6 +1204,7 @@ class SectorAnalysis:
         x_bins = np.linspace(-1.5, 1.5, 20)
         y_bins = np.linspace(0, 50, 20)
         Z = np.zeros((len(y_bins) - 1, len(x_bins) - 1))
+
 
         # 가우시안 분포 계산
         for angle, dist in zip(angles, distances):
@@ -1216,150 +1220,86 @@ class SectorAnalysis:
         self.x_bins = x_bins
         self.y_bins = y_bins
 
+
     def get_column_sum(self):
         closest_index = np.abs(self.x_bins - 0).argmin()
         column_sum = self.Z[:, closest_index].sum()
         return column_sum
-
-import numpy as np
-
-class FrameAnalyzer:
-    '''
-    공을 잡은 상황에서, 팀 동료의 위치와 패스 경로에 대한 압박 정보를 기반으로 패스 수신자를 예측하는 클래스
-    '''
-    def __init__(self, db, action, action_index):
-        self.frame = action["freeze_frame_360"]
-        self.db = db
-        self.game_id=action_index[0]
-        self.possession_team_id = action["possession_team_id"]
-        self.actor_location = next(player for player in self.frame if player['actor'])
-        self.actor_x, self.actor_y = self.actor_location['x'], self.actor_location['y']
     
-    def get_distance_to_goal(self):
-        '''
-        가능한 패스 수신자로부터 공격방향 쪽 골대까지의 거리를 계산
-        '''
-        home_team_id, _ = self.db.get_home_away_team_id(self.game_id)
+    def calculate_xP(self, distance_lambda_=0.005, column_gamma_=2, sigma_x=0.2, sigma_y=3):
+    
+        results = []
+        column_sums = []      
+            #
+        distance = np.sqrt((self.teammate['x'] - self.ball_x) ** 2 + (self.teammate['y'] - self.ball_y) ** 2)
         
-        goal_center = (120, 40) if home_team_id == self.possession_team_id else (0, 40)
-        distance_from_goal = {}
+        # 압박(column sum) 계산
+        self.calculate_opponents_in_sector()
+        self.calculate_gaussian_distribution(sigma_x=sigma_x, sigma_y=sigma_y)
+        column_sum = self.get_column_sum()
         
-        for idx, player in enumerate(self.frame):
-            if player['teammate'] and not player['actor']:
-                distance = np.sqrt((player['x'] - goal_center[0]) ** 2 + (player['y'] - goal_center[1]) ** 2)
-                distance_from_goal[idx] = distance
-        return distance_from_goal
+        column_sums.append(column_sum)
+        results.append({
+            "receiver_idx": self.player_idx,
+            "distance": distance,
+            "column_sum": column_sum,
+            "xP": None  # xP는 나중에 계산
+        })
 
-    def get_distance_between_actor_teammates(self):
-        '''
-        가능한 수신자로부터 actor와의 거리를 계산
-        '''
-        distances_between_us = {}
-        for idx, player in enumerate(self.frame):
-            if player['teammate'] and not player['actor']:
-                distance = np.sqrt((player['x'] - self.actor_x) ** 2 + (player['y'] - self.actor_y) ** 2)
-                distances_between_us[idx] = distance
-        return distances_between_us
+        for result in results:
+            # xP 계산
+            result["xP"] = (
+                (1+np.log(-distance_lambda_ * result["distance"]+1))*
+                (1/(1+column_gamma_*result["column_sum"]))         
+            )
+        return results
 
-    def calculate_column_sum(self, angle=45):
-        ''' 
-        가능한 패스 경로에 대한 압박 정보를 계산
-        '''
         
-        teammates = [i for i, player in enumerate(self.frame) if player['teammate'] and not player['actor']]
-        column_sums = {}
         
-        for idx in teammates:
-            try:
-                analysis = SectorAnalysis(self.frame, angle=angle, player_idx=idx)
-                analysis.calculate_opponents_in_sector()
-                analysis.calculate_gaussian_distribution()
-                column_sum = analysis.get_column_sum()
-                column_sums[idx] = column_sum
-            except ValueError as e:
-                print(f"Skipping player at index {idx} - {e}")
-        
-        return column_sums
-
-    def get_top_n_teammates(self, n=3):
-        '''
-        주어진 기준에 따라 최상위 n명의 팀 동료를 반환
-        '''
-        
-        distance_to_goal = self.get_distance_to_goal()
-        distance_from_actor = self.get_distance_between_actor_teammates()
-        column_sums = self.calculate_column_sum()
-
-        scores = {
-            idx: 1 / (1 + distance_to_goal[idx]) + 1 / (1 + distance_from_actor[idx]) + (1 - column_sums[idx])
-            for idx in distance_to_goal
-        }
-
-        top_n_teammates = sorted(scores, key=scores.get, reverse=True)[:n]
-        
-        return top_n_teammates
-
-@required_fields(["freeze_frame_360", "possession_team_id"])
+@required_fields(["freeze_frame_360", "start_x", "start_y"])
 @simple
-def get_closest_n_players_features(action, db, n=3):
-    """
-    위에서 고안된 로직에 의해 추출된 N명의 Teammates들에 대한 거리와 각도를 반환합니다.
-    
-    
-    Parameters
-    ----------
-    game_id : int
-        The ID of the game.
-    train_db : Database
-        The database containing game data.
-    action_index : int
-        The index of the action to analyze.
-    n : int, optional, default=3
-        The number of closest teammates to analyze.
-        
-    Returns
-    -------
-    pd.DataFrame
-        A single-row DataFrame with columns for each teammate's distance and angle:
-        ['closest_1_distance', 'closest_1_radian', 'closest_2_distance', 'closest_2_radian', ...].
-    """
-    all_action_data = []
-    # FrameAnalyzer 객체 생성
-    for action_index, action in action.iterrows():
-        if action["freeze_frame_360"] is None:
-            # freeze_frame이 None이면 해당 action을 건너뜀
-            continue      
-        frame_analyzer = FrameAnalyzer(db=db, action=action, action_index=action_index)
-        top_teammates = frame_analyzer.get_top_n_teammates(n=n)
+def get_xp_to_player(actions, min_players=3):
+    # 결과 저장용 2D 배열을 NaN으로 초기화
+    results = np.full((len(actions), min_players), np.nan, dtype=float)
 
-        # 현재 actor의 위치를 가져옴
-        actor_x, actor_y = frame_analyzer.actor_x, frame_analyzer.actor_y
-        angle_distance_info = []
+    for i, (_, action) in enumerate(actions.iterrows()):
+        if not action["freeze_frame_360"]:
+            continue
 
-        # N명의 Teammates에 대한 거리와 각도 계산
-        for idx in top_teammates:
-            teammate = frame_analyzer.frame[idx]
-            teammate_x, teammate_y = teammate['x'], teammate['y']
+        df_freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
+        start_x, start_y = action.start_x, action.start_y
 
-            
-            distance = np.sqrt((teammate_x - actor_x) ** 2 + (teammate_y - actor_y) ** 2)
-            angle = np.arctan2(teammate_y - actor_y, teammate_x - actor_x)
+        # 상대 선수 필터링
+        opponent_locs = df_freeze_frame[~df_freeze_frame.teammate]
+        if opponent_locs.empty:
+            continue
+        dist_presser_to_target = np.sqrt((opponent_locs.x - start_x) ** 2 + (opponent_locs.y - start_y) ** 2)
+        target_idx = dist_presser_to_target.idxmin()
+        ball_x, ball_y = opponent_locs.loc[target_idx, ["x", "y"]].values
 
-            angle_distance_info.append((distance, angle))
+        freeze_frame = action["freeze_frame_360"]
+        possible_reciever = opponent_locs.index.difference([target_idx])
 
-        # N명의 Teammates가 없을 경우 NaN으로 채움
-        while len(angle_distance_info) < n:
-            angle_distance_info.append((np.nan, np.nan))
+        xp_values = []
+        for player_idx in possible_reciever:
+            sector_analysis = SectorAnalysis(ball_x, ball_y, freeze_frame=freeze_frame, angle=45, player_idx=player_idx, visualize=False)
+            xp_result = sector_analysis.calculate_xP()
+            xp_values.append({
+                "player_idx": player_idx,
+                "distance": np.sqrt((sector_analysis.teammate['x'] - ball_x) ** 2 + (sector_analysis.teammate['y'] - ball_y) ** 2),
+                "xP": xp_result[0]["xP"]
+            })
 
-        # dictionary로 변환
-        action_data = {}
-        for i, (distance, angle) in enumerate(angle_distance_info, start=1):
-            action_data[f'closest_{i}_distance'] = distance
-            action_data[f'closest_{i}_radian'] = angle
-        all_action_data.append(pd.Series(action_data, name=action_index))
-        # DataFrame으로 변환
-    return pd.DataFrame(all_action_data)
+        # 거리 기준 정렬
+        xp_values = sorted(xp_values, key=lambda x: x["xP"], reverse=True)
 
+        # xP 값만 추출하여 NaN 배열에 채우기
+        xp_only = [x["xP"] for x in xp_values]
+        results[i, :len(xp_only)] = xp_only[:min_players]
+
+    # 결과를 데이터프레임으로 변환
+    columns = [f"xp_to_idx{i+1}" for i in range(min_players)]
+    return pd.DataFrame(results, index=actions.index, columns=columns)
 
 
 
@@ -1411,7 +1351,7 @@ all_features = [
     closest_3_players,
     extract_all_players,
     expected_receiver_and_presser,
-    get_closest_n_players_features
+    get_xp_to_player
 ]
 
 
@@ -1444,7 +1384,8 @@ def get_features(
     """
     # retrieve actions from database
     
-    actions = add_names(db.actions(game_id))
+    actions = add_names(db.actions(game_id)).reset_index()
+
     # filter actions of interest
     if actionfilter is None:
         idx = pd.Series([True] * len(actions), index=actions.index)
@@ -1453,21 +1394,24 @@ def get_features(
 
     # check if we have to return an empty dataframe
     if idx.sum() < 1:
-        column_names = feature_column_names(xfns, nb_prev_actions)
+        column_names = []
+        for fn in xfns:
+            column_names.extend(feature_column_names([fn], nb_prev_actions))
         return pd.DataFrame(columns=column_names)
-    
+
     if len(xfns) < 1:
         return pd.DataFrame(index=actions.index.values[idx])
     
-
     # convert actions to gamestates
     home_team_id, _ = db.get_home_away_team_id(game_id)
+
     states = play_left_to_right(gamestates(actions, nb_prev_actions), home_team_id)
+    states = [state.loc[idx].copy() for state in states]
 
     # compute features
     df_features = reduce(
         lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
-        (fn(states).loc[idx] for fn in xfns),
+        (fn(states) for fn in xfns),
     )
 
     return df_features
