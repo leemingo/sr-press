@@ -76,7 +76,6 @@ TABLE_ACTIONS = [
     "possession_team_id",
     "play_pattern_name",
     "under_pressure",
-    "duration",
     "extra",
     "visible_area_360",
     "in_visible_area_360",

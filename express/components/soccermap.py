@@ -27,8 +27,8 @@ class _FeatureExtractionLayer(nn.Module):
 
     def __init__(self, in_channels):
         super().__init__()
-        self.conv_1 = nn.Conv2d(in_channels, 32, kernel_size=(5, 5), stride=1, padding="valid")
-        self.conv_2 = nn.Conv2d(32, 64, kernel_size=(5, 5), stride=1, padding="valid")
+        self.conv_1 = nn.Conv2d(in_channels, 16, kernel_size=(5, 5), stride=1, padding="valid")
+        self.conv_2 = nn.Conv2d(16, 16, kernel_size=(5, 5), stride=1, padding="valid")
         # (left, right, top, bottom)
         self.symmetric_padding = nn.ReplicationPad2d((2, 2, 2, 2))
 
@@ -52,8 +52,8 @@ class _PredictionLayer(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(64, 32, kernel_size=(1, 1))
-        self.conv2 = nn.Conv2d(32, 1, kernel_size=(1, 1))
+        self.conv1 = nn.Conv2d(16, 16, kernel_size=(1, 1))
+        self.conv2 = nn.Conv2d(16, 1, kernel_size=(1, 1))
 
     def forward(self, x: torch.Tensor):
         x = F.relu(self.conv1(x))
@@ -76,8 +76,8 @@ class _UpSamplingLayer(nn.Module):
     def __init__(self):
         super().__init__()
         self.up = nn.UpsamplingNearest2d(scale_factor=2)
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=1, padding="valid")
-        self.conv2 = nn.Conv2d(32, 1, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv2 = nn.Conv2d(16, 1, kernel_size=(3, 3), stride=1, padding="valid")
         self.symmetric_padding = nn.ReplicationPad2d((1, 1, 1, 1))
 
     def forward(self, x: torch.Tensor):
@@ -138,14 +138,18 @@ class SoccerMap(nn.Module):
 
         # Convolutions for feature extraction at 1x, 1/2x and 1/4x scale
         self.features_x1 = _FeatureExtractionLayer(self.in_channels)
-        self.features_x2 = _FeatureExtractionLayer(64)
-        self.features_x4 = _FeatureExtractionLayer(64)
+        self.features_x2 = _FeatureExtractionLayer(16)
+        self.features_x4 = _FeatureExtractionLayer(16)
+        self.features_x8 = _FeatureExtractionLayer(16)
+        self.features_x16 = _FeatureExtractionLayer(16)
 
         # Layers for down and upscaling and merging scales
         self.up_x2 = _UpSamplingLayer()
         self.up_x4 = _UpSamplingLayer()
         self.down_x2 = nn.MaxPool2d(kernel_size=(2, 2))
         self.down_x4 = nn.MaxPool2d(kernel_size=(2, 2))
+        self.down_x8 = nn.MaxPool2d(kernel_size=(2, 2))
+        self.down_x16 = nn.MaxPool2d(kernel_size=(2, 2))
         self.fusion_x2_x4 = _FusionLayer()
         self.fusion_x1_x2 = _FusionLayer()
 
@@ -153,11 +157,13 @@ class SoccerMap(nn.Module):
         self.prediction_x1 = _PredictionLayer()
         self.prediction_x2 = _PredictionLayer()
         self.prediction_x4 = _PredictionLayer()
+        self.prediction_x8 = _PredictionLayer()
+        self.prediction_x16 = _PredictionLayer()
 
         # output layer: binary classification
         self.output_layer = nn.Sequential(
             nn.Flatten(),                      # Flatten to (batch_size, num_features)
-            nn.Linear(68*104, 1),              # Linear layer to output a single value
+            nn.Linear((68 // 8)* (104 //8), 1),              # Linear layer to output a single value
         )
 
     def forward(self, x):
@@ -165,18 +171,21 @@ class SoccerMap(nn.Module):
         f_x1 = self.features_x1(x)
         f_x2 = self.features_x2(self.down_x2(f_x1))
         f_x4 = self.features_x4(self.down_x4(f_x2))
+        f_x8 = self.features_x8(self.down_x8(f_x4))
+        
+        pred_x8 = self.prediction_x8(f_x8)
 
         # Prediction
-        pred_x1 = self.prediction_x1(f_x1)
-        pred_x2 = self.prediction_x2(f_x2)
-        pred_x4 = self.prediction_x4(f_x4)
+        #pred_x1 = self.prediction_x1(f_x1)
+        #pred_x2 = self.prediction_x2(f_x2)
+        #pred_x4 = self.prediction_x4(f_x4)
 
         # Fusion
-        x4x2combined = self.fusion_x2_x4([self.up_x4(pred_x4), pred_x2])
-        combined = self.fusion_x1_x2([self.up_x2(x4x2combined), pred_x1]) # (bs, 1, 68, 104)
+        #x4x2combined = self.fusion_x2_x4([self.up_x4(pred_x4), pred_x2])
+        #combined = self.fusion_x1_x2([self.up_x2(x4x2combined), pred_x1]) # (bs, 1, 68, 104)
 
         # The activation function depends on the problem
-        return self.output_layer(combined)  # Output shape: (bs, 1)
+        return self.output_layer(pred_x8)  # Output shape: (bs, 1)
         #return combined
 
 def pixel(surface, mask):
@@ -315,7 +324,7 @@ class ToSoccerMapTensor:
         target = target = int(sample["counterpress"]) if "counterpress" in sample else None
 
         # Location of the player that passes the ball
-        # passer_coo = frame.loc[frame.actor, ["x", "y"]].fillna(1e-10).values.reshape(-1, 2)
+        presser_coo = frame.loc[frame.actor, ["x", "y"]].fillna(1e-10).values.reshape(-1, 2)
         # Location of the ball
         ball_coo = np.array([[start_x, start_y]])
         # Location of the goal
@@ -327,31 +336,38 @@ class ToSoccerMapTensor:
         players_def_coo = frame.loc[~frame.teammate, ["x", "y"]].values.reshape(-1, 2)
 
         # Output
-        matrix = np.zeros((7, self.y_bins, self.x_bins))
+        matrix = np.zeros((8, self.y_bins, self.x_bins))
+        
+        x_bin_press, y_bin_press = self._get_cell_indexes(
+            presser_coo[:, 0],
+            presser_coo[:, 1],
+        )
+        matrix[0, y_bin_press, x_bin_press] = 1
+        
 
         # CH 1: Locations of attacking team
         x_bin_att, y_bin_att = self._get_cell_indexes(
             players_att_coo[:, 0],
             players_att_coo[:, 1],
         )
-        matrix[0, y_bin_att, x_bin_att] = 1
+        matrix[1, y_bin_att, x_bin_att] = 1
 
         # CH 2: Locations of defending team
         x_bin_def, y_bin_def = self._get_cell_indexes(
             players_def_coo[:, 0],
             players_def_coo[:, 1],
         )
-        matrix[1, y_bin_def, x_bin_def] = 1
+        matrix[2, y_bin_def, x_bin_def] = 1
 
         # CH 3: Distance to ball
         yy, xx = np.ogrid[0.5 : self.y_bins, 0.5 : self.x_bins]
 
         x0_ball, y0_ball = self._get_cell_indexes(ball_coo[:, 0], ball_coo[:, 1])
-        matrix[2, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
+        matrix[3, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
 
         # CH 4: Distance to goal
         x0_goal, y0_goal = self._get_cell_indexes(goal_coo[:, 0], goal_coo[:, 1])
-        matrix[3, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
+        matrix[4, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
 
         # CH 5: Cosine of the angle between the ball and goal
         coords = np.dstack(np.meshgrid(xx, yy))
@@ -359,16 +375,16 @@ class ToSoccerMapTensor:
         ball_coo_bin = np.concatenate((x0_ball, y0_ball))
         a = goal_coo_bin - coords
         b = ball_coo_bin - coords
-        matrix[4, :, :] = np.clip(
+        matrix[5, :, :] = np.clip(
             np.sum(a * b, axis=2) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)), -1, 1
         )
 
         # CH 6: Sine of the angle between the ball and goal
         # sin = np.cross(a,b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
-        matrix[5, :, :] = np.sqrt(1 - matrix[4, :, :] ** 2)  # This is much faster
+        matrix[6, :, :] = np.sqrt(1 - matrix[5, :, :] ** 2)  # This is much faster
 
         # CH 7: Angle (in radians) to the goal location
-        matrix[6, :, :] = np.abs(
+        matrix[7, :, :] = np.abs(
             np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
         )
 

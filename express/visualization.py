@@ -81,8 +81,8 @@ def plot_action(
         opponent_locs['distance'] = opponent_locs.apply(lambda row: calculate_distance(action.start_x, action.start_y, row.x, row.y), axis=1)
         closest_opponents = opponent_locs.nsmallest(3, 'distance')
 
-        p.scatter(closest_teammates.x, closest_teammates.y, color=color_list[0], s=200, ec="k", edgecolor=color_list[0], ax=ax)
-        p.scatter(closest_opponents.x, closest_opponents.y, color=color_list[1], s=200, ec="k", edgecolor=color_list[1], ax=ax)
+        p.scatter(closest_teammates.x, closest_teammates.y, color=color_list[0], s=200, edgecolor=color_list[0], ax=ax)
+        p.scatter(closest_opponents.x, closest_opponents.y, color=color_list[1], s=200, edgecolor=color_list[1], ax=ax)
 
         p.scatter(teammate_locs.x, teammate_locs.y, c=color_list[0], s=200, ec="k", alpha=0.5, ax=ax)
         p.scatter(opponent_locs.x, opponent_locs.y, c=color_list[1], s=200, ec="k", alpha=0.5, ax=ax)

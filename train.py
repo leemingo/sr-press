@@ -20,7 +20,7 @@ from express.components.soccermap import PytorchSoccerMapModel, ToSoccerMapTenso
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument(
         "--model",
         type=str,
@@ -80,18 +80,14 @@ if __name__ == "__main__":
 
     model_path = os.path.join(base_path, "stores", "model", args.model)
     save_path = os.path.join(model_path, f"{args.trial:03d}")
-    if not os.path.exists(model_path):
-        os.makedirs(model_path)
-    
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-        params["save_path"] = save_path
-    else:
-        raise FileExistsError(f"The directory '{save_path}' already exists.")
+
+    os.makedirs(model_path, exist_ok=True)
+    os.makedirs(save_path, exist_ok=True)
+    params["save_path"] = save_path
 
     dataset_train = partial(PressingDataset, path=os.path.join(base_path, "stores", "datasets", "train"))
     dataset_test = partial(PressingDataset, path=os.path.join(base_path, "stores", "datasets", "test"))
-    
+
     train_dataset = PressingDataset(
         path= os.path.join(base_path, "stores", "datasets", "train"),
         xfns= args.xfns,
@@ -116,12 +112,12 @@ if __name__ == "__main__":
         key = xfn[0].__name__ # Callable: function
         values = xfn[1] # List: columns
 
-    
+
         # 설명: nb_prev_actions는 현재 액션을 포함해 사용할 액션의 수를 지정합니다.
         # nb_prev_actions=1: 현재 액션만 사용
         # nb_prev_actions=2: 현재 액션 + 이전 액션
         if key in args.xfns:
-            features[key] = [value for value in values if int(value[-1:]) < args.nb_prev_actions] 
+            features[key] = [value for value in values if int(value[-1:]) < args.nb_prev_actions]
 
     if args.model == "xgboost":
         component= press.XGBoostComponent(
@@ -144,7 +140,7 @@ if __name__ == "__main__":
         )
     elif args.model == "soccermap":
         component= press.SoccerMapComponent(
-            model = PytorchSoccerMapModel(model_config= params["ModelConfig"], 
+            model = PytorchSoccerMapModel(model_config= params["ModelConfig"],
                                           optimizer_params= params["OptimizerConfig"]),
             features = features,
             label = label,
@@ -157,12 +153,12 @@ if __name__ == "__main__":
     # If parameter tuning is required, pass `param_grid` and 'optimized_metric' to the train function
     optimized_metric= "f1_weighted"
     param_grid = {                      # xgboost paramter
-        'n_estimators': [100, 200],  
-        'max_depth': [4, 6],  
-        'learning_rate': [0.05, 0.1],  
-        'subsample': [0.8, 1.0],  
-        'colsample_bytree': [0.8, 1.0], 
-        'min_child_weight': [1, 3]  
+        'n_estimators': [100, 200],
+        'max_depth': [4, 6],
+        'learning_rate': [0.05, 0.1],
+        'subsample': [0.8, 1.0],
+        'colsample_bytree': [0.8, 1.0],
+        'min_child_weight': [1, 3]
     }
 
     component.train(dataset_train, param_grid= None, optimized_metric= None)

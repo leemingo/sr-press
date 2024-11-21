@@ -169,7 +169,7 @@ class SQLiteDatabase(Database):
         actions["freeze_frame_360"] = actions["freeze_frame_360"].apply(json.dumps).astype("str")
         
         self.cursor.executemany(
-            "REPLACE INTO actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
+            "REPLACE INTO actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
             actions[TABLE_ACTIONS].itertuples(index=False),
         )
         self.conn.commit()

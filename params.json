@@ -1,7 +1,7 @@
 {
     "xgboost": {
         "ModelConfig": {
-        "n_estimators": 100,
+        "n_estimators": 200,
         "max_depth": 5,
         "seed": 0,
         "enable_categorical": false,
@@ -36,30 +36,30 @@
 
     "soccermap": {
         "DataConfig": {
-            "batch_size": 32,
+            "batch_size": 16,
             "num_workers": 8,
             "pin_memory": true
         },
         "TrainerConfig": {
-            "max_epochs": 50,
-            "min_epochs": 10,
-            "gradient_clip_val": 2.0,
+            "max_epochs": 200,
+            "min_epochs": 100,
+            "gradient_clip_val": 100,
             "devices": 1,
             "accelerator": "auto"
         },
         "OptimizerConfig": {
             "optimizer_params": {
                 "lr": 1e-4,
-                "weight_decay": 1e-5
+                "weight_decay": 1e-8
             }
         },
         "ModelConfig": {
-            "in_channels": 7
+            "in_channels": 8
         },
 
         "EarlyStopConfig": {
-            "patience": 5,
-            "min_delta": 1e-3,
+            "patience": 20,
+            "min_delta": 1e-4,
             "mode": "min",
             "strict": false,
             "verbose": true
