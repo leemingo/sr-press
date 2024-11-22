@@ -277,8 +277,8 @@ class PytorchSoccerMapModel(pl.LightningModule):
         self.sigmoid = nn.Sigmoid()
 
         # loss function
-        # self.criterion = torch.nn.BCELoss()
-        self.criterion = FocalLoss()
+        self.criterion = torch.nn.BCELoss()
+        # self.criterion = FocalLoss()
         
         self.optimizer_params = optimizer_params
 
@@ -370,79 +370,89 @@ class ToSoccerMapTensor:
         return x_bin, y_bin
 
     def __call__(self, sample):
-        start_x, start_y = sample["start_x_a0"],sample["start_y_a0"]
-
-        frame = pd.DataFrame.from_records(sample["freeze_frame_360_a0"])
-        target = target = int(sample["counterpress"]) if "counterpress" in sample else None
-
-        # Location of the player that passes the ball
-        presser_coo = frame.loc[frame.actor, ["x", "y"]].fillna(1e-10).values.reshape(-1, 2)
-        # Location of the ball
-        ball_coo = np.array([[start_x, start_y]])
-        # Location of the goal
-        goal_coo = np.array([[105, 34]])
-        # Locations of the passing player's teammates
-        players_att_coo = frame.loc[frame.teammate, ["x", "y"]].values.reshape(-1, 2)
-
-        # Locations and speed vector of the defending players
-        players_def_coo = frame.loc[~frame.teammate, ["x", "y"]].values.reshape(-1, 2)
-
+        
+        nb_prev_actions = 3
         # Output
-        matrix = np.zeros((9, self.y_bins, self.x_bins))
+        matrix = np.zeros((9 * nb_prev_actions, self.y_bins, self.x_bins))
         
-        x_bin_press, y_bin_press = self._get_cell_indexes(
-            presser_coo[:, 0],
-            presser_coo[:, 1],
-        )
-        matrix[0, y_bin_press, x_bin_press] = 1
         
+        for i in range(nb_prev_actions):
+            start_x, start_y = sample[f"start_x_a{i}"],sample[f"start_y_a{i}"]
+            
+            if sample[f"freeze_frame_360_a{i}"] is None:
+                continue
 
-        # CH 1: Locations of attacking team
-        x_bin_att, y_bin_att = self._get_cell_indexes(
-            players_att_coo[:, 0],
-            players_att_coo[:, 1],
-        )
-        matrix[1, y_bin_att, x_bin_att] = 1
+            frame = pd.DataFrame.from_records(sample[f"freeze_frame_360_a{i}"])
+            target = target = int(sample["counterpress"]) if "counterpress" in sample else None
+            
 
-        # CH 2: Locations of defending team
-        x_bin_def, y_bin_def = self._get_cell_indexes(
-            players_def_coo[:, 0],
-            players_def_coo[:, 1],
-        )
-        matrix[2, y_bin_def, x_bin_def] = 1
+            # Location of the player that passes the ball
+            presser_coo = frame.loc[frame.actor, ["x", "y"]].fillna(1e-10).values.reshape(-1, 2)
+            # Location of the ball
+            ball_coo = np.array([[start_x, start_y]])
+            # Location of the goal
+            goal_coo = np.array([[105, 34]])
+            # Locations of the passing player's teammates
+            players_att_coo = frame.loc[frame.teammate, ["x", "y"]].values.reshape(-1, 2)
 
-        # CH 3: Distance to ball
-        yy, xx = np.ogrid[0.5 : self.y_bins, 0.5 : self.x_bins]
+            # Locations and speed vector of the defending players
+            players_def_coo = frame.loc[~frame.teammate, ["x", "y"]].values.reshape(-1, 2)
 
-        x0_ball, y0_ball = self._get_cell_indexes(ball_coo[:, 0], ball_coo[:, 1])
-        matrix[3, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
+            
+            
+            x_bin_press, y_bin_press = self._get_cell_indexes(
+                presser_coo[:, 0],
+                presser_coo[:, 1],
+            )
+            matrix[0 + i * 9, y_bin_press, x_bin_press] = 1
+            
 
-        # CH 4: Distance to goal
-        x0_goal, y0_goal = self._get_cell_indexes(goal_coo[:, 0], goal_coo[:, 1])
-        matrix[4, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
-        
-        # CH 5: Distance to pressor
-        matrix[5, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
-        
+            # CH 1: Locations of attacking team
+            x_bin_att, y_bin_att = self._get_cell_indexes(
+                players_att_coo[:, 0],
+                players_att_coo[:, 1],
+            )
+            matrix[1 + i * 9, y_bin_att, x_bin_att] = 1
 
-        # CH 5: Cosine of the angle between the ball and goal
-        coords = np.dstack(np.meshgrid(xx, yy))
-        goal_coo_bin = np.concatenate((x0_goal, y0_goal))
-        ball_coo_bin = np.concatenate((x0_ball, y0_ball))
-        a = goal_coo_bin - coords
-        b = ball_coo_bin - coords
-        matrix[6, :, :] = np.clip(
-            np.sum(a * b, axis=2) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)), -1, 1
-        )
+            # CH 2: Locations of defending team
+            x_bin_def, y_bin_def = self._get_cell_indexes(
+                players_def_coo[:, 0],
+                players_def_coo[:, 1],
+            )
+            matrix[2 + i * 9, y_bin_def, x_bin_def] = 1
 
-        # CH 6: Sine of the angle between the ball and goal
-        # sin = np.cross(a,b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
-        matrix[7, :, :] = np.sqrt(1 - matrix[6, :, :] ** 2)  # This is much faster
+            # CH 3: Distance to ball
+            yy, xx = np.ogrid[0.5 : self.y_bins, 0.5 : self.x_bins]
 
-        # CH 7: Angle (in radians) to the goal location
-        matrix[8, :, :] = np.abs(
-            np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
-        )
+            x0_ball, y0_ball = self._get_cell_indexes(ball_coo[:, 0], ball_coo[:, 1])
+            matrix[3 + i * 9, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
+
+            # CH 4: Distance to goal
+            x0_goal, y0_goal = self._get_cell_indexes(goal_coo[:, 0], goal_coo[:, 1])
+            matrix[4 + i * 9, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
+            
+            # CH 5: Distance to pressor
+            # matrix[5 + i * 9, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
+            
+
+            # CH 6: Cosine of the angle between the ball and goal
+            coords = np.dstack(np.meshgrid(xx, yy))
+            goal_coo_bin = np.concatenate((x0_goal, y0_goal))
+            ball_coo_bin = np.concatenate((x0_ball, y0_ball))
+            a = goal_coo_bin - coords
+            b = ball_coo_bin - coords
+            matrix[6 + i * 9, :, :] = np.clip(
+                np.sum(a * b, axis=2) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)), -1, 1
+            )
+
+            # CH 7: Sine of the angle between the ball and goal
+            # sin = np.cross(a,b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
+            matrix[7 + i * 9, :, :] = np.sqrt(1 - matrix[6 + i * 9, :, :] ** 2)  # This is much faster
+
+            # CH 8: Angle (in radians) to the goal location
+            matrix[8 + i * 9, :, :] = np.abs(
+                np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
+            )
 
         if target is not None:
             return (

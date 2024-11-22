@@ -54,7 +54,7 @@
             }
         },
         "ModelConfig": {
-            "in_channels": 9
+            "in_channels": 27
         },
 
         "EarlyStopConfig": {

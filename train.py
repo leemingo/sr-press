@@ -112,6 +112,7 @@ if __name__ == "__main__":
         key = xfn[0].__name__ # Callable: function
         values = xfn[1] # List: columns
 
+        print(f"Feature: {key}, Columns: {values}")
 
         # 설명: nb_prev_actions는 현재 액션을 포함해 사용할 액션의 수를 지정합니다.
         # nb_prev_actions=1: 현재 액션만 사용
