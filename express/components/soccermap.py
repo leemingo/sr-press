@@ -27,10 +27,10 @@ class _FeatureExtractionLayer(nn.Module):
 
     def __init__(self, in_channels):
         super().__init__()
-        self.conv_1 = nn.Conv2d(in_channels, 16, kernel_size=(5, 5), stride=1, padding="valid")
-        self.conv_2 = nn.Conv2d(16, 16, kernel_size=(5, 5), stride=1, padding="valid")
+        self.conv_1 = nn.Conv2d(in_channels, 32, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv_2 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1, padding="valid")
         # (left, right, top, bottom)
-        self.symmetric_padding = nn.ReplicationPad2d((2, 2, 2, 2))
+        self.symmetric_padding = nn.ReplicationPad2d((1, 1, 1, 1))
 
     def forward(self, x):
         x = F.relu(self.conv_1(x))
@@ -52,8 +52,8 @@ class _PredictionLayer(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(16, 16, kernel_size=(1, 1))
-        self.conv2 = nn.Conv2d(16, 1, kernel_size=(1, 1))
+        self.conv1 = nn.Conv2d(64, 32, kernel_size=(1, 1))
+        self.conv2 = nn.Conv2d(32, 1, kernel_size=(1, 1))
 
     def forward(self, x: torch.Tensor):
         x = F.relu(self.conv1(x))
@@ -76,8 +76,8 @@ class _UpSamplingLayer(nn.Module):
     def __init__(self):
         super().__init__()
         self.up = nn.UpsamplingNearest2d(scale_factor=2)
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=(3, 3), stride=1, padding="valid")
-        self.conv2 = nn.Conv2d(16, 1, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv2 = nn.Conv2d(32, 1, kernel_size=(3, 3), stride=1, padding="valid")
         self.symmetric_padding = nn.ReplicationPad2d((1, 1, 1, 1))
 
     def forward(self, x: torch.Tensor):
@@ -138,10 +138,10 @@ class SoccerMap(nn.Module):
 
         # Convolutions for feature extraction at 1x, 1/2x and 1/4x scale
         self.features_x1 = _FeatureExtractionLayer(self.in_channels)
-        self.features_x2 = _FeatureExtractionLayer(16)
-        self.features_x4 = _FeatureExtractionLayer(16)
-        self.features_x8 = _FeatureExtractionLayer(16)
-        self.features_x16 = _FeatureExtractionLayer(16)
+        self.features_x2 = _FeatureExtractionLayer(64)
+        self.features_x4 = _FeatureExtractionLayer(64)
+        self.features_x8 = _FeatureExtractionLayer(64)
+        self.features_x16 = _FeatureExtractionLayer(64)
 
         # Layers for down and upscaling and merging scales
         self.up_x2 = _UpSamplingLayer()
@@ -150,6 +150,7 @@ class SoccerMap(nn.Module):
         self.down_x4 = nn.MaxPool2d(kernel_size=(2, 2))
         self.down_x8 = nn.MaxPool2d(kernel_size=(2, 2))
         self.down_x16 = nn.MaxPool2d(kernel_size=(2, 2))
+        
         self.fusion_x2_x4 = _FusionLayer()
         self.fusion_x1_x2 = _FusionLayer()
 
@@ -163,7 +164,7 @@ class SoccerMap(nn.Module):
         # output layer: binary classification
         self.output_layer = nn.Sequential(
             nn.Flatten(),                      # Flatten to (batch_size, num_features)
-            nn.Linear((68 // 8)* (104 //8), 1),              # Linear layer to output a single value
+            nn.Linear((68 // 16)* (104 //16), 1),              # Linear layer to output a single value
         )
 
     def forward(self, x):
@@ -172,8 +173,9 @@ class SoccerMap(nn.Module):
         f_x2 = self.features_x2(self.down_x2(f_x1))
         f_x4 = self.features_x4(self.down_x4(f_x2))
         f_x8 = self.features_x8(self.down_x8(f_x4))
+        f_x16 = self.features_x16(self.down_x16(f_x8))
         
-        pred_x8 = self.prediction_x8(f_x8)
+        pred_x16 = self.prediction_x16(f_x16)
 
         # Prediction
         #pred_x1 = self.prediction_x1(f_x1)
@@ -185,7 +187,7 @@ class SoccerMap(nn.Module):
         #combined = self.fusion_x1_x2([self.up_x2(x4x2combined), pred_x1]) # (bs, 1, 68, 104)
 
         # The activation function depends on the problem
-        return self.output_layer(pred_x8)  # Output shape: (bs, 1)
+        return self.output_layer(pred_x16)  # Output shape: (bs, 1)
         #return combined
 
 def pixel(surface, mask):
@@ -210,6 +212,53 @@ def pixel(surface, mask):
     value = torch.sum(masked, dim=(3, 2))
     return value
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=0.8, gamma=2.0, reduction='mean'):
+        """
+        Focal Loss implementation.
+        
+        Args:
+            alpha (float): Weighting factor for the positive class.
+            gamma (float): Focusing parameter to adjust the rate at which easy examples are down-weighted.
+            reduction (str): Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+        """
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        """
+        Args:
+            inputs (Tensor): Predicted probabilities (output of sigmoid).
+            targets (Tensor): Ground truth labels (binary, 0 or 1).
+        
+        Returns:
+            Tensor: Computed focal loss.
+        """
+        # Clip inputs to avoid log(0)
+        inputs = torch.clamp(inputs, 1e-8, 1 - 1e-8)
+        
+        # Compute the binary cross entropy loss
+        bce_loss = -(targets * torch.log(inputs) + (1 - targets) * torch.log(1 - inputs))
+        
+        # Compute the modulating factor
+        pt = torch.where(targets == 1, inputs, 1 - inputs)  # p_t
+        modulating_factor = (1 - pt) ** self.gamma
+        
+        # Apply alpha weighting
+        alpha_factor = torch.where(targets == 1, self.alpha, 1 - self.alpha)
+        
+        # Compute the focal loss
+        focal_loss = alpha_factor * modulating_factor * bce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:  # 'none'
+            return focal_loss
+
 class PytorchSoccerMapModel(pl.LightningModule):
     """A pass success probability model based on the SoccerMap architecture."""
 
@@ -228,7 +277,9 @@ class PytorchSoccerMapModel(pl.LightningModule):
         self.sigmoid = nn.Sigmoid()
 
         # loss function
-        self.criterion = torch.nn.BCELoss()
+        # self.criterion = torch.nn.BCELoss()
+        self.criterion = FocalLoss()
+        
         self.optimizer_params = optimizer_params
 
     def forward(self, x: torch.Tensor):
@@ -246,6 +297,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
         # y_hat = pixel(surface, mask)
 
         loss = self.criterion(y_hat, y)
+        
         return loss, y_hat, y
 
     def training_step(self, batch: Any, batch_idx: int):
@@ -336,7 +388,7 @@ class ToSoccerMapTensor:
         players_def_coo = frame.loc[~frame.teammate, ["x", "y"]].values.reshape(-1, 2)
 
         # Output
-        matrix = np.zeros((8, self.y_bins, self.x_bins))
+        matrix = np.zeros((9, self.y_bins, self.x_bins))
         
         x_bin_press, y_bin_press = self._get_cell_indexes(
             presser_coo[:, 0],
@@ -368,6 +420,10 @@ class ToSoccerMapTensor:
         # CH 4: Distance to goal
         x0_goal, y0_goal = self._get_cell_indexes(goal_coo[:, 0], goal_coo[:, 1])
         matrix[4, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
+        
+        # CH 5: Distance to pressor
+        matrix[5, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
+        
 
         # CH 5: Cosine of the angle between the ball and goal
         coords = np.dstack(np.meshgrid(xx, yy))
@@ -375,16 +431,16 @@ class ToSoccerMapTensor:
         ball_coo_bin = np.concatenate((x0_ball, y0_ball))
         a = goal_coo_bin - coords
         b = ball_coo_bin - coords
-        matrix[5, :, :] = np.clip(
+        matrix[6, :, :] = np.clip(
             np.sum(a * b, axis=2) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)), -1, 1
         )
 
         # CH 6: Sine of the angle between the ball and goal
         # sin = np.cross(a,b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
-        matrix[6, :, :] = np.sqrt(1 - matrix[5, :, :] ** 2)  # This is much faster
+        matrix[7, :, :] = np.sqrt(1 - matrix[6, :, :] ** 2)  # This is much faster
 
         # CH 7: Angle (in radians) to the goal location
-        matrix[7, :, :] = np.abs(
+        matrix[8, :, :] = np.abs(
             np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
         )
 

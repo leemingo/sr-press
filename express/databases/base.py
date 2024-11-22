@@ -80,6 +80,7 @@ TABLE_ACTIONS = [
     "visible_area_360",
     "in_visible_area_360",
     "freeze_frame_360",
+    "duration"
 ]
 
 # Ensure that the `home_team` always plays from the left side and the `away_team` from the right side.  

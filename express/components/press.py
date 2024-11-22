@@ -23,7 +23,8 @@ from .base import (
     exPressComponent,
     expressXGBoostComponent,
     expressSymbolicComponent,
-    exPressPytorchComponent
+    exPressPytorchComponent,
+    expressScikitComponent
 )
 from .soccermap import PytorchSoccerMapModel, ToSoccerMapTensor
 
@@ -97,7 +98,43 @@ class XGBoostComponent(PressingComponent, expressXGBoostComponent):
                 f.write(f"\n##### {metric_name} #####\n")
                 for epoch, value in enumerate(metric_values):
                     f.write(f"Epoch {epoch + 1}: {value}\n")
-            
+
+class ScikitComponent(PressingComponent, expressScikitComponent):
+    """A XGBoost model based on handcrafted features."""
+
+    def __init__(
+        self, model, 
+        features: Dict[str, List[str]], 
+        label: List[str],
+        params: Dict[str, Dict[str, Union[int, str, bool]]] 
+    ):
+        super().__init__(
+            model=model,
+            features=features,
+            label=label,
+        )
+        self.save_path = params["save_path"]
+
+    def train(self, dataset, param_grid=None, optimized_metric=None, **train_cfg) -> Optional[float]:
+        # Load data
+        data = self.initialize_dataset(dataset)
+
+        
+        X_train, y_train = data.features, data.labels
+
+        X_train = X_train.fillna(0)
+
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train, y_train, test_size=0.2, stratify=y_train
+        )
+        self.model.fit(X_train, y_train)
+
+        with open(os.path.join(self.save_path, "log.txt"), "w") as f:
+            # save xgboost's parameter
+            f.write("##### Model Configuration #####\n")
+            for key, value in self.model.get_params().items():
+                f.write(f"{key}: {value}\n")
+
 class SymbolicComponent(PressingComponent, expressSymbolicComponent):
     """A XGBoost model based on handcrafted features."""
 

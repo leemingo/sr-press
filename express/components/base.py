@@ -101,6 +101,48 @@ class expressXGBoostComponent(exPressComponent):
             raise AttributeError(f"Unsupported xgboost model: {type(self.model)}")
         return pd.Series(y_hat, index=data.features.index)
 
+class expressScikitComponent(exPressComponent):
+    """Base class for an XGBoost-based component."""
+
+    def __init__(self, model, features, label):
+        super().__init__(features, label)
+        self.model = model
+
+    def train(self, dataset, optimized_metric=None, **train_cfg) -> Optional[float]:
+        # Load data
+        data = self.initialize_dataset(dataset)
+        
+        X_train, X_val, y_train, y_val = train_test_split(
+            data.features, data.labels, test_size=0.2
+        )
+
+        
+
+        self.model.fit(X_train, y_train)
+
+        # Return metric score for hyperparameter optimization
+        if optimized_metric is not None:
+            idx = self.model.best_iteration
+            return self.model.evals_result()["validation_0"][optimized_metric][idx]
+
+        return None
+
+    def test(self, dataset) -> Dict[str, float]:
+        data = self.initialize_dataset(dataset)
+        X_test, y_test = data.features, data.labels
+
+        X_test = X_test.fillna(0)
+        
+        y_hat = self.model.predict_proba(X_test)[:, 1]
+        
+        return self._get_metrics(y_test, y_hat)
+
+    def predict(self, dataset) -> pd.Series:
+        data = self.initialize_dataset(dataset)
+        y_hat = self.model.predict_proba(data.features)[:, 1]
+        
+        return pd.Series(y_hat, index=data.features.index)
+
 class expressSymbolicComponent(exPressComponent):
     """Base class for an Symbolic-based component."""
 
