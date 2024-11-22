@@ -12,6 +12,7 @@ def plot_action(
     show_action=True,
     show_visible_area=True,
     home_team_id=None,
+    prob=None,
     ax=None,
 ) -> None:
     """Plot a SPADL(include pressing) action with 360 freeze frame.
@@ -60,7 +61,6 @@ def plot_action(
             ax=ax,
         )
 
-
     # plot visible area
     if show_visible_area:
         # parse freeze frame
@@ -87,11 +87,19 @@ def plot_action(
         p.scatter(teammate_locs.x, teammate_locs.y, c=color_list[0], s=200, ec="k", alpha=0.5, ax=ax)
         p.scatter(opponent_locs.x, opponent_locs.y, c=color_list[1], s=200, ec="k", alpha=0.5, ax=ax)
         p.scatter(event_player_loc.x, event_player_loc.y, c=color_list[2], s=400, ec="k", marker="*", ax=ax)
+        
+        for idx, row in teammate_locs.iterrows():
+            ax.text(row.x, row.y, str(idx), color="white", fontsize=10, ha="center", va="center")
+        for idx, row in opponent_locs.iterrows():
+            ax.text(row.x, row.y, str(idx), color="white", fontsize=10, ha="center", va="center")
     else:
         p.scatter(action.start_x, action.start_y, c=color_list[2], s=400, ec="k", marker="*", ax=ax)
         p.scatter(action.end_x, action.end_y, c=color_list[2], s=400, ec="k", marker="*", ax=ax)
 
-    ax.set_title(f'{action["type_name"]}')
+    if prob is not None:
+        ax.set_title(f'{action["type_name"]} & {action["result_name"]}: {prob:.5f}')
+    else:
+        ax.set_title(f'{action["type_name"]} & {action["result_name"]}')
     
     hometeam_dot = mlines.Line2D([], [], color="b" , marker='o', linestyle='None', markersize=10, label='Home')
     awayteam_dot = mlines.Line2D([], [], color='r', marker='o', linestyle='None', markersize=10, label='Away')

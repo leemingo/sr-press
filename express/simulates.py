@@ -16,93 +16,158 @@ from rich.progress import track
 from tqdm import tqdm
 from sklearn.model_selection import cross_val_score, train_test_split
 from torch.utils.data import DataLoader, Subset, random_split
-
+from express.utils import add_names, play_left_to_right
 from express.datasets import PressingDataset
-
+from express.features import gamestates
 from itertools import product
+import express.config as config
+from functools import partial, reduce, wraps
+import copy
+
+class SimulatedInstance:
+    def __init__(self, raw_data, features, raw, freeze_frame_idx, simulated_x, simulated_y):
+        self.data = raw_data
+        self.features = features
+        self.raw = raw
+        self.freeze_frame_idx = freeze_frame_idx
+        self.simulated_x = simulated_x
+        self.simulated_y = simulated_y
+        self.prob = None
 
 class expressXGBoostComponent():
-    def __init__(self, component, dataset):
-        self.component = component
-        self.model = component.model
-        self.dataset = dataset
+    def __init__(self, 
+                 component, 
+                 db,
+                 xfns: List[Callable],
+                 nb_prev_actions: int = 3,
+                 x_bins: int = 105,
+                 y_bins: int = 68
+        ):
+            self.component = component
+            self.model = component.model
+            self.db = db
 
-    def adjust_player_positions(self, idx, target=None, adjustments=None):
-        if adjustments is None:
-            x_changes = range(-5, 6)
-            y_changes = range(-5, 6)
+            self.xfns = xfns
+            self.nb_prev_actions = nb_prev_actions
+            self.x_bins, self.y_bins = x_bins, y_bins
 
-            # player_id: actor, teammate_1, opponent_1, teammate_2, opponent_2,.....teammate_11, opponent_11
-            player = "actor" if target is None else target
-            adjustments_list = [{'player_id': player, 'dx': dx, 'dy': dy} for dx, dy in product(x_changes, y_changes)]
+    def simulate_features(
+        self,
+        game_id: int,
+        action_id: int,
+        freeze_frame_idx: int = 0,
+        xy: Optional[List[pd.DataFrame]] = None,
+    ):
+        """Apply a list of feature generators.
 
-        results = []
-        for adj in adjustments_list:
-            simulated_sample = self.dataset.features.loc[idx].copy()
+        Parameters
+        ----------
+        game_id : int
+            The ID of the game for which features should be computed.
+        action_id : int
+            The ID of the action for which features should be computed.
+        xfns : List[Callable], optional
+            The feature generators.
+        nb_prev_actions : int, optional
+            The number of previous actions to be included in a game state.
+        xy: list(pd.DataFrame), optional
+            The x and y coordinates of simulated start location.
+        x_bins : int, optional
+            The number of bins to simulated for the start location along the x-axis.
+        y_bins : int, optional
+            The number of bins to simulated for the start location along the y-axis.
 
-            if adj["player_id"] == "actor":
-                x_col, y_col = ["start_x_a0"], ["start_y_a0"]
-                player = "press"
-            else:
-                x_col = [col for col in simulated_sample.columns if col.startswith(adj["player_id"]) and "x" in col]
-                y_col = [col for col in simulated_sample.columns if col.startswith(adj["player_id"]) and "y" in col]
 
-                if len(x_col) != 1:
-                    raise ValueError(f"x_col 중복 또는 누락 발생: {x_col}")
-                if len(y_col) != 1:
-                    raise ValueError(f"y_col 중복 또는 누락 발생: {y_col}")
-            
-            simulated_sample[x_col[0]] += adj["dx"]
-            simulated_sample[y_col[0]] += adj["dy"] 
+        Returns
+        -------
+        pd.DataFrame
+            A dataframe with the features.
+        """
+        # retrieve actions from database
+        actions = add_names(self.db.actions(game_id)).reset_index()
+        idx = actions[(actions["game_id"] == game_id) & (actions["action_id"] == action_id)].index # only an event
 
-            probability = self.model.predict_proba(simulated_sample.to_frame().T)[:, 1]
-            results.append({"dx": adj["dx"], "dy": adj["dy"], 
-                            "simulated_x": simulated_sample[x_col[0]], "simulated_y": simulated_sample[y_col[0]],
-                            "action": simulated_sample,
-                            'probability': probability[0]}) # probability[0]: convert list to scalar
+        if len(idx) != 1:
+            raise ValueError(f"idx 중복 또는 누락 발생: {idx}")
+        else:
+            idx = idx[0]
 
-        return results
-    
-    def predict(self, idx):
-        sample_features = self.dataset.features.loc[idx]
-        prob = self.model.predict_proba(sample_features.to_frame().T)[:, 1]
+        # convert actions to gamestates
+        home_team_id, _ = self.db.get_home_away_team_id(game_id)
+        states = play_left_to_right(gamestates(actions, self.nb_prev_actions), home_team_id)
+        states = [state.loc[[idx]].copy() for state in states]
         
-        return prob[0] # convert list to scalar
-        
-class exPressPytorchComponent():
-    def __init__(self, component, dataset):
-        self.component = component
-        self.model = component.model
-        self.dataset = dataset
+        # simulate start location
+        if xy is None:
+            # create bin centers
+            yy, xx = np.ogrid[0.5:self.y_bins, 0.5:self.x_bins]
+            # map to spadl coordinates
+            x_coo = np.clip(xx / self.x_bins * config.field_length, 0, config.field_length)
+            y_coo = np.clip(yy / self.y_bins * config.field_width, 0, config.field_width)
 
-    def adjust_player_positions(self, idx, adjustments=None):
-        if adjustments is None:
-            x_changes = range(-5, 6)
-            y_changes = range(-5, 6)
-            adjustments_list = [{'player_id': 0, 'x': dx, 'y': dy} for dx, dy in product(x_changes, y_changes)]
-        
-        sample_features = self.dataset.features.loc[idx].to_dict()
-        game_id, action_id = self.dataset.features.loc[idx].name
-        sample_target = self.dataset.labels.loc[idx].to_dict()
+        simulated_instances = []
+        # compute fixed features(raw features)
+        df_fixed_features = reduce(
+            lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
+            (fn(states) for fn in self.xfns),
+        )
+        simulated_instances.append(SimulatedInstance(states[0], df_fixed_features, raw=True,
+                                                     freeze_frame_idx= freeze_frame_idx, simulated_x=None, simulated_y=None))
 
-        print(sample_features)
-        print(sample_target)
-        ss
-        results = []
-        for adj in adjustments_list:
-            
-            simulated_data = adjust_player_positions(original_data, {adj['player_id']: (adj['x'], adj['y'])})
-            transformed_data = self.transform(simulated_data)
-            probability = model.predict(transformed_data)
-            results.append({'adjustment': adj, 'probability': probability})
+        if xy is None:
+            for x, y in tqdm(np.array(np.meshgrid(x_coo, y_coo)).T.reshape(-1, 2)):
+                copy_states = copy.deepcopy(states) # deep copy
+                copy_freeze_frame = pd.DataFrame(copy_states[0].at[idx, "freeze_frame_360"])
+                copy_freeze_frame.loc[freeze_frame_idx, ["x", "y"]] = (x, y) 
 
-        sample = {
-            "game_id": game_id,
-            "action_id": action_id,
-            **sample_features,
-            **sample_target,
-        }
+                # actor: (start_x, start_y) and freeze_frame_360'actor coordinate가 변경되야함
+                if copy_freeze_frame.at[freeze_frame_idx, "actor"]:
+                    copy_states[0].loc[idx, ["start_x", "start_y"]] = (x, y)
+                    copy_states[0].loc[idx, ["end_x", "end_y"]] = (x, y) 
+                    
+                copy_states[0].at[idx, "freeze_frame_360"] = copy_freeze_frame.to_dict(orient="records")
 
-        for player_id, new_position in adjustments.items():
-            adjusted_data.loc[adjusted_data['player_id'] == player_id, ['x', 'y']] = new_position
-        return adjusted_data
+                df_simulated_features = reduce(
+                        lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
+                        (fn(copy_states) for fn in self.xfns),
+                    )
+                simulated_instances.append(SimulatedInstance(copy_states[0], df_simulated_features, raw=False,
+                                                             freeze_frame_idx= freeze_frame_idx, simulated_x= x, simulated_y= y))
+        else:
+            for x, y in tqdm(xy):
+                copy_states = copy.deepcopy(states) # deep copy
+                copy_freeze_frame = pd.DataFrame(copy_states[0].at[idx, "freeze_frame_360"])
+                copy_freeze_frame.loc[freeze_frame_idx, ["x", "y"]] = (x, y) 
+
+                # actor: (start_x, start_y) and freeze_frame_360'actor coordinate가 변경되야함
+                if copy_freeze_frame.at[freeze_frame_idx, "actor"]:
+                    copy_states[0].loc[idx, ["start_x", "start_y"]] = (x, y) 
+                    copy_states[0].loc[idx, ["end_x", "end_y"]] = (x, y) 
+
+                copy_states[0].at[idx, "freeze_frame_360"] = copy_freeze_frame.to_dict(orient="records")
+
+                df_simulated_features = reduce(
+                        lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
+                        (fn(copy_states) for fn in self.xfns),
+                    )
+                simulated_instances.append(SimulatedInstance(copy_states[0], df_simulated_features, raw=False,
+                                                             freeze_frame_idx= freeze_frame_idx, simulated_x= x, simulated_y= y))
+
+        return simulated_instances
+
+    def simulate(        
+        self,
+        game_id: int,
+        action_id: int,
+        freeze_frame_idx: int = 0,
+        xy: Optional[List[pd.DataFrame]] = None,
+    ):
+        simulated_instances = self.simulate_features(game_id, action_id, freeze_frame_idx, xy)
+
+        for instance in simulated_instances:
+            features = instance.features
+            prob = self.model.predict_proba(features)[:, 1]
+            instance.prob = prob[0] # convert list to scalar
+
+        return simulated_instances
+     
