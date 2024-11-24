@@ -397,15 +397,12 @@ class ToSoccerMapTensor:
 
             # Locations and speed vector of the defending players
             players_def_coo = frame.loc[~frame.teammate, ["x", "y"]].values.reshape(-1, 2)
-
-            
             
             x_bin_press, y_bin_press = self._get_cell_indexes(
                 presser_coo[:, 0],
                 presser_coo[:, 1],
             )
             matrix[0 + i * 9, y_bin_press, x_bin_press] = 1
-            
 
             # CH 1: Locations of attacking team
             x_bin_att, y_bin_att = self._get_cell_indexes(
@@ -433,7 +430,7 @@ class ToSoccerMapTensor:
             
             # CH 5: Distance to pressor
             # matrix[5 + i * 9, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
-            
+            # matrix[5 + i * 9, y0_ball, x0_ball] = 1
 
             # CH 6: Cosine of the angle between the ball and goal
             coords = np.dstack(np.meshgrid(xx, yy))
