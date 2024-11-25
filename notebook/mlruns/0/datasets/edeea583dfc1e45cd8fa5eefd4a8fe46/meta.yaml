@@ -1,9 +1,0 @@
-digest: eff97285
-name: dataset
-profile: '{"features_shape": [39046, 195], "features_size": 7613970, "features_nbytes":
-  30455880}'
-schema: '{"mlflow_tensorspec": {"features": "[{\"type\": \"tensor\", \"tensor-spec\":
-  {\"dtype\": \"float32\", \"shape\": [-1, 195]}}]", "targets": null}}'
-source: '{"tags": {"mlflow.user": "ubuntu", "mlflow.source.name": "/home/ubuntu/.local/lib/python3.10/site-packages/ipykernel_launcher.py",
-  "mlflow.source.type": "LOCAL"}}'
-source_type: code

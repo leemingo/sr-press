@@ -1,0 +1,14 @@
+# Ignored Directory
+stores/model/
+stores/logs/
+notebook/mlruns/
+lightning_logs/
+express/__pycache__/
+express/components/__pycache__/
+
+# Python related cahce files
+*.pyc
+__pycache__/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
