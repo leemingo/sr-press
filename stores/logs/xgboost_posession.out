@@ -1,0 +1,118 @@
+nohup: ignoring input
+/home/ubuntu/miniforge3/envs/mm/lib/python3.10/site-packages/dask/dataframe/__init__.py:42: FutureWarning: 
+Dask dataframe query planning is disabled because dask-expr is not installed.
+
+You can install it with `pip install dask[dataframe]` or `conda install dask`.
+This will raise in a future version.
+
+  warnings.warn(msg, FutureWarning)
+
+Train DataSet: (39046, 195), Test DataSet: (12406, 195)
+Train Dataset: {(False,): 26746, (True,): 12300}, Test Dataset: {(False,): 8596, (True,): 3810}
+
+[0]	validation_0-logloss:0.60324
+[1]	validation_0-logloss:0.59243
+[2]	validation_0-logloss:0.58631
+[3]	validation_0-logloss:0.58154
+[4]	validation_0-logloss:0.57924
+[5]	validation_0-logloss:0.57726
+[6]	validation_0-logloss:0.57490
+[7]	validation_0-logloss:0.57378
+[8]	validation_0-logloss:0.57340
+[9]	validation_0-logloss:0.57193
+[10]	validation_0-logloss:0.57177
+[11]	validation_0-logloss:0.57140
+[12]	validation_0-logloss:0.57099
+[13]	validation_0-logloss:0.57043
+[14]	validation_0-logloss:0.57010
+[15]	validation_0-logloss:0.56999
+[16]	validation_0-logloss:0.56938
+[17]	validation_0-logloss:0.56981
+[18]	validation_0-logloss:0.56980
+[19]	validation_0-logloss:0.57032
+[20]	validation_0-logloss:0.57071
+[21]	validation_0-logloss:0.57031
+[22]	validation_0-logloss:0.57028
+[23]	validation_0-logloss:0.56997
+[24]	validation_0-logloss:0.56979
+[25]	validation_0-logloss:0.56972
+[26]	validation_0-logloss:0.57028
+[27]	validation_0-logloss:0.57022
+[28]	validation_0-logloss:0.57104
+[29]	validation_0-logloss:0.57052
+[30]	validation_0-logloss:0.57098
+[31]	validation_0-logloss:0.57043
+[32]	validation_0-logloss:0.57068
+[33]	validation_0-logloss:0.57072
+[34]	validation_0-logloss:0.57077
+[35]	validation_0-logloss:0.57098
+[36]	validation_0-logloss:0.57036
+[37]	validation_0-logloss:0.57054
+[38]	validation_0-logloss:0.57087
+[39]	validation_0-logloss:0.57136
+[40]	validation_0-logloss:0.57174
+[41]	validation_0-logloss:0.57206
+[42]	validation_0-logloss:0.57225
+[43]	validation_0-logloss:0.57253
+[44]	validation_0-logloss:0.57242
+[45]	validation_0-logloss:0.57264
+[46]	validation_0-logloss:0.57275
+[47]	validation_0-logloss:0.57264
+[48]	validation_0-logloss:0.57237
+[49]	validation_0-logloss:0.57258
+[50]	validation_0-logloss:0.57276
+[51]	validation_0-logloss:0.57273
+[52]	validation_0-logloss:0.57286
+[53]	validation_0-logloss:0.57244
+[54]	validation_0-logloss:0.57261
+[55]	validation_0-logloss:0.57249
+[56]	validation_0-logloss:0.57307
+[57]	validation_0-logloss:0.57333
+[58]	validation_0-logloss:0.57325
+[59]	validation_0-logloss:0.57419
+[60]	validation_0-logloss:0.57440
+[61]	validation_0-logloss:0.57401
+[62]	validation_0-logloss:0.57421
+[63]	validation_0-logloss:0.57398
+[64]	validation_0-logloss:0.57421
+[65]	validation_0-logloss:0.57417
+[66]	validation_0-logloss:0.57446
+[67]	validation_0-logloss:0.57413
+[68]	validation_0-logloss:0.57445
+[69]	validation_0-logloss:0.57486
+[70]	validation_0-logloss:0.57491
+[71]	validation_0-logloss:0.57511
+[72]	validation_0-logloss:0.57541
+[73]	validation_0-logloss:0.57564
+[74]	validation_0-logloss:0.57610
+[75]	validation_0-logloss:0.57644
+[76]	validation_0-logloss:0.57684
+[77]	validation_0-logloss:0.57715
+[78]	validation_0-logloss:0.57724
+[79]	validation_0-logloss:0.57683
+[80]	validation_0-logloss:0.57623
+[81]	validation_0-logloss:0.57622
+[82]	validation_0-logloss:0.57640
+[83]	validation_0-logloss:0.57651
+[84]	validation_0-logloss:0.57705
+[85]	validation_0-logloss:0.57765
+[86]	validation_0-logloss:0.57782
+[87]	validation_0-logloss:0.57806
+[88]	validation_0-logloss:0.57867
+[89]	validation_0-logloss:0.57916
+[90]	validation_0-logloss:0.57917
+[91]	validation_0-logloss:0.57909
+[92]	validation_0-logloss:0.57938
+[93]	validation_0-logloss:0.57928
+[94]	validation_0-logloss:0.57970
+[95]	validation_0-logloss:0.57981
+[96]	validation_0-logloss:0.58002
+[97]	validation_0-logloss:0.57999
+[98]	validation_0-logloss:0.58014
+[99]	validation_0-logloss:0.58037
+########## Train Metrics ##########
+{'precision': 0.8793237164572669, 'recall': 0.4608943089430894, 'f1': 0.6047900997492932, 'log_loss': 0.4338015429069588, 'brier': 0.13679198275368493, 'roc_auc': 0.8733530977050592}
+
+########## Test Metrics ##########
+{'precision': 0.5852668213457076, 'recall': 0.2648293963254593, 'f1': 0.3646548608601373, 'log_loss': 0.5837456160413366, 'brier': 0.19672095982276427, 'roc_auc': 0.6579714180678555}
+

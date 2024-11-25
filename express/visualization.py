@@ -43,7 +43,7 @@ def plot_action(
                       pitch_color= (0/255, 128/255, 0/255, 0.5), line_color='white')
 
     if ax is None:
-        _, ax = p.draw(figsize=(8, 12))
+        _, ax = p.draw(figsize=(6, 8))
     else:
         p.draw(ax=ax)
 
@@ -62,7 +62,7 @@ def plot_action(
         )
 
     # plot visible area
-    if show_visible_area:
+    if show_visible_area and action["visible_area_360"] is not None:
         # parse freeze frame
         freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
         visible_area = action["visible_area_360"]
@@ -81,8 +81,11 @@ def plot_action(
         opponent_locs['distance'] = opponent_locs.apply(lambda row: calculate_distance(action.start_x, action.start_y, row.x, row.y), axis=1)
         closest_opponents = opponent_locs.nsmallest(3, 'distance')
 
-        p.scatter(closest_teammates.x, closest_teammates.y, color=color_list[0], s=200, ec="k", edgecolor=color_list[0], ax=ax)
-        p.scatter(closest_opponents.x, closest_opponents.y, color=color_list[1], s=200, ec="k", edgecolor=color_list[1], ax=ax)
+        # p.scatter(closest_teammates.x, closest_teammates.y, color=color_list[0], s=200, ec="k", edgecolor=color_list[0], ax=ax)
+        # p.scatter(closest_opponents.x, closest_opponents.y, color=color_list[1], s=200, ec="k", edgecolor=color_list[1], ax=ax)
+        p.scatter(closest_teammates.x, closest_teammates.y, color=color_list[0], s=200, ec="k", ax=ax)
+        p.scatter(closest_opponents.x, closest_opponents.y, color=color_list[1], s=200, ec="k", ax=ax)
+
 
         p.scatter(teammate_locs.x, teammate_locs.y, c=color_list[0], s=200, ec="k", alpha=0.5, ax=ax)
         p.scatter(opponent_locs.x, opponent_locs.y, c=color_list[1], s=200, ec="k", alpha=0.5, ax=ax)
@@ -96,13 +99,22 @@ def plot_action(
         p.scatter(action.start_x, action.start_y, c=color_list[2], s=400, ec="k", marker="*", ax=ax)
         p.scatter(action.end_x, action.end_y, c=color_list[2], s=400, ec="k", marker="*", ax=ax)
 
+    period = action['period_id']
+    min = int(action['time_seconds'] // 60)
+    sec = int(action['time_seconds'] % 60)
     if prob is not None:
-        ax.set_title(f'{action["type_name"]} & {action["result_name"]}: {prob:.5f}')
+        ax.set_title(f'{action["type_name"]} & {action["result_name"]}: {prob:.5f} | {min} : {sec}')
     else:
-        ax.set_title(f'{action["type_name"]} & {action["result_name"]}')
-    
-    hometeam_dot = mlines.Line2D([], [], color="b" , marker='o', linestyle='None', markersize=10, label='Home')
-    awayteam_dot = mlines.Line2D([], [], color='r', marker='o', linestyle='None', markersize=10, label='Away')
+        if action['possession_team_id'] == home_team_id:
+            ax.set_title(f'{action["type_name"]} & {action["result_name"]} | {period} - {min} : {sec} | Possession : Home')
+        else:
+            ax.set_title(f'{action["type_name"]} & {action["result_name"]} | {period} - {min} : {sec} | Possession : Away')
+    if action['team_id'] == home_team_id:
+        hometeam_dot = mlines.Line2D([], [], color="b" , marker='o', linestyle='None', markersize=10, label='Home')
+        awayteam_dot = mlines.Line2D([], [], color='r', marker='o', linestyle='None', markersize=10, label='Away', markerfacecolor='none')
+    else:
+        hometeam_dot = mlines.Line2D([], [], color="b" , marker='o', linestyle='None', markersize=10, label='Home', markerfacecolor='none')
+        awayteam_dot = mlines.Line2D([], [], color='r', marker='o', linestyle='None', markersize=10, label='Away')
     event_player_dot = mlines.Line2D([], [], color='g', marker='o', linestyle='None', markersize=10, label=f'{action["type_name"]} player')
 
     ax.legend(handles=[hometeam_dot, awayteam_dot, event_player_dot], loc='upper left')

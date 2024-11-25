@@ -89,18 +89,23 @@ if __name__ == "__main__":
     else:
         raise FileExistsError(f"The directory '{save_path}' already exists.")
 
-    dataset_train = partial(PressingDataset, path=os.path.join(base_path, "stores", "datasets", "train"))
-    dataset_test = partial(PressingDataset, path=os.path.join(base_path, "stores", "datasets", "test"))
+    root_path = "/data/mm/sr-press"
+    # dataset_train = partial(PressingDataset, path=os.path.join(base_path, "stores", "datasets", "train"))
+    # dataset_test = partial(PressingDataset, path=os.path.join(base_path, "stores", "datasets", "test"))
+    dataset_train = partial(PressingDataset, path=os.path.join(root_path, "stores", "datasets", "train"))
+    dataset_test = partial(PressingDataset, path=os.path.join(root_path, "stores", "datasets", "test"))
     
     train_dataset = PressingDataset(
-        path= os.path.join(base_path, "stores", "datasets", "train"),
+        # path= os.path.join(base_path, "stores", "datasets", "train"),
+        path= os.path.join(root_path, "stores", "datasets", "train"),
         xfns= args.xfns,
         yfns= args.yfns,
         load_cached= True,
         nb_prev_actions= args.nb_prev_actions
     )
     test_dataset = PressingDataset(
-        path= os.path.join(base_path, "stores", "datasets", "test"),
+        # path= os.path.join(base_path, "stores", "datasets", "test"),
+        path= os.path.join(root_path, "stores", "datasets", "test"),
         xfns= args.xfns,
         yfns= args.yfns,
         load_cached= True,

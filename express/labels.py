@@ -66,7 +66,46 @@ def counterpress(actions: pd.DataFrame) -> pd.DataFrame:
     counter_press = (actions["result_id"] == config.results.index("success"))
     return pd.DataFrame(counter_press.values, columns=["counterpress"])
 
-all_labels = [concede_shots, counterpress] 
+def posession_change(actions: pd.DataFrame, n_seconds: int = 5) -> pd.DataFrame:
+    """
+    Determine if possession changes within n (5) seconds after each 'pressing' action in the game_actions DataFrame.
+
+    Parameters:
+    actions : pd.DataFrame
+        The actions of a game.
+    n_seconds : int, default=5
+        The time limit in seconds to consider for posession changed actions after a pressing.
+
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with a column 'change_posessions' where each row is True if a posession changed occurs within the
+        specified time limit after a pressing; otherwise False.
+    """
+    pressing = actions["type_name"] == "pressing"
+    pressing_idx_list = list(pressing[pressing==True].index)
+
+    for pressing_idx in pressing_idx_list:
+        pressing_row = actions.loc[pressing_idx]
+        seq_idx_list = list(actions[(actions['period_id'] == pressing_row['period_id']) & (actions['time_seconds'] >= pressing_row['time_seconds']) & (actions['time_seconds'] <= pressing_row['time_seconds'] + n_seconds)].index) # Indexing events within n seconds
+
+        if actions.loc[seq_idx_list[-1]]['type_name'] != 'shot' and seq_idx_list[-1] != actions['action_id'].max(): # In cases such as throw-ins or fouls where possession changes, the next event is assigned after 5 seconds, so one additional event is included.
+            seq_idx_list.append(seq_idx_list[-1] + 1)
+        
+        seq_df = actions.loc[seq_idx_list]
+        seq_df = seq_df[seq_df['original_event_id'].notna()]
+
+        pressing_team_id = pressing_row['team_id']
+        if pressing_team_id in seq_df['possession_team_id'].values:
+            pressing[pressing_idx] = True
+        else:
+            pressing[pressing_idx] = False
+    return pd.DataFrame(pressing.values, columns=["posession_change"])
+
+
+
+all_labels = [concede_shots, counterpress, posession_change] 
 
 def get_labels(
     db: Database,

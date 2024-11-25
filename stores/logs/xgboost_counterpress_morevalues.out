@@ -1,0 +1,127 @@
+nohup: ignoring input
+/home/ubuntu/miniforge3/envs/mm/lib/python3.10/site-packages/dask/dataframe/__init__.py:42: FutureWarning: 
+Dask dataframe query planning is disabled because dask-expr is not installed.
+
+You can install it with `pip install dask[dataframe]` or `conda install dask`.
+This will raise in a future version.
+
+  warnings.warn(msg, FutureWarning)
+ic| args.xfns: ['startlocation',
+                'endlocation',
+                'movement',
+                'startpolar',
+                'endpolar',
+                'team',
+                'time',
+                'goalscore',
+                'closest_11_players']
+
+Train DataSet: (39046, 236), Test DataSet: (12406, 236)
+Train Dataset: {(False,): 31605, (True,): 7441}, Test Dataset: {(False,): 9954, (True,): 2452}
+
+[0]	validation_0-logloss:0.43490
+[1]	validation_0-logloss:0.40530
+[2]	validation_0-logloss:0.38684
+[3]	validation_0-logloss:0.37237
+[4]	validation_0-logloss:0.36290
+[5]	validation_0-logloss:0.35483
+[6]	validation_0-logloss:0.34891
+[7]	validation_0-logloss:0.34494
+[8]	validation_0-logloss:0.34106
+[9]	validation_0-logloss:0.33873
+[10]	validation_0-logloss:0.33652
+[11]	validation_0-logloss:0.33503
+[12]	validation_0-logloss:0.33180
+[13]	validation_0-logloss:0.33001
+[14]	validation_0-logloss:0.32895
+[15]	validation_0-logloss:0.32745
+[16]	validation_0-logloss:0.32658
+[17]	validation_0-logloss:0.32514
+[18]	validation_0-logloss:0.32449
+[19]	validation_0-logloss:0.32378
+[20]	validation_0-logloss:0.32323
+[21]	validation_0-logloss:0.32237
+[22]	validation_0-logloss:0.32158
+[23]	validation_0-logloss:0.32041
+[24]	validation_0-logloss:0.31841
+[25]	validation_0-logloss:0.31751
+[26]	validation_0-logloss:0.31607
+[27]	validation_0-logloss:0.31574
+[28]	validation_0-logloss:0.31539
+[29]	validation_0-logloss:0.31456
+[30]	validation_0-logloss:0.31371
+[31]	validation_0-logloss:0.31315
+[32]	validation_0-logloss:0.31206
+[33]	validation_0-logloss:0.31162
+[34]	validation_0-logloss:0.31132
+[35]	validation_0-logloss:0.31087
+[36]	validation_0-logloss:0.31046
+[37]	validation_0-logloss:0.31012
+[38]	validation_0-logloss:0.31033
+[39]	validation_0-logloss:0.31016
+[40]	validation_0-logloss:0.30996
+[41]	validation_0-logloss:0.30986
+[42]	validation_0-logloss:0.30941
+[43]	validation_0-logloss:0.30965
+[44]	validation_0-logloss:0.30849
+[45]	validation_0-logloss:0.30870
+[46]	validation_0-logloss:0.30768
+[47]	validation_0-logloss:0.30746
+[48]	validation_0-logloss:0.30734
+[49]	validation_0-logloss:0.30770
+[50]	validation_0-logloss:0.30796
+[51]	validation_0-logloss:0.30754
+[52]	validation_0-logloss:0.30715
+[53]	validation_0-logloss:0.30694
+[54]	validation_0-logloss:0.30709
+[55]	validation_0-logloss:0.30691
+[56]	validation_0-logloss:0.30705
+[57]	validation_0-logloss:0.30666
+[58]	validation_0-logloss:0.30623
+[59]	validation_0-logloss:0.30628
+[60]	validation_0-logloss:0.30568
+[61]	validation_0-logloss:0.30570
+[62]	validation_0-logloss:0.30599
+[63]	validation_0-logloss:0.30582
+[64]	validation_0-logloss:0.30583
+[65]	validation_0-logloss:0.30572
+[66]	validation_0-logloss:0.30555
+[67]	validation_0-logloss:0.30546
+[68]	validation_0-logloss:0.30537
+[69]	validation_0-logloss:0.30517
+[70]	validation_0-logloss:0.30525
+[71]	validation_0-logloss:0.30558
+[72]	validation_0-logloss:0.30546
+[73]	validation_0-logloss:0.30512
+[74]	validation_0-logloss:0.30482
+[75]	validation_0-logloss:0.30478
+[76]	validation_0-logloss:0.30488
+[77]	validation_0-logloss:0.30499
+[78]	validation_0-logloss:0.30456
+[79]	validation_0-logloss:0.30445
+[80]	validation_0-logloss:0.30436
+[81]	validation_0-logloss:0.30357
+[82]	validation_0-logloss:0.30353
+[83]	validation_0-logloss:0.30353
+[84]	validation_0-logloss:0.30350
+[85]	validation_0-logloss:0.30309
+[86]	validation_0-logloss:0.30266
+[87]	validation_0-logloss:0.30295
+[88]	validation_0-logloss:0.30290
+[89]	validation_0-logloss:0.30277
+[90]	validation_0-logloss:0.30269
+[91]	validation_0-logloss:0.30285
+[92]	validation_0-logloss:0.30303
+[93]	validation_0-logloss:0.30274
+[94]	validation_0-logloss:0.30233
+[95]	validation_0-logloss:0.30198
+[96]	validation_0-logloss:0.30220
+[97]	validation_0-logloss:0.30258
+[98]	validation_0-logloss:0.30250
+[99]	validation_0-logloss:0.30246
+########## Train Metrics ##########
+{'precision': 0.8751830756712775, 'recall': 0.7227523182367961, 'f1': 0.7916973354924187, 'log_loss': 0.19543237904740382, 'brier': 0.05615539383895467, 'roc_auc': 0.9639373438608259}
+
+########## Test Metrics ##########
+{'precision': 0.737669376693767, 'recall': 0.5550570962479608, 'f1': 0.6334652082848499, 'log_loss': 0.3012194571574553, 'brier': 0.09199944454484914, 'roc_auc': 0.8999735856719048}
+

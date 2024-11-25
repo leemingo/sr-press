@@ -1,0 +1,6 @@
+model_config:
+  in_channels: 7
+optimizer_params:
+  optimizer_params:
+    lr: 1.0e-05
+    weight_decay: 1.0e-05
