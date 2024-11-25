@@ -372,8 +372,10 @@ class ToSoccerMapTensor:
     def __call__(self, sample):
         
         nb_prev_actions = 3
+        
+        num_features = 7
         # Output
-        matrix = np.zeros((9 * nb_prev_actions, self.y_bins, self.x_bins))
+        matrix = np.zeros((num_features * nb_prev_actions, self.y_bins, self.x_bins))
         
         
         for i in range(nb_prev_actions):
@@ -402,35 +404,35 @@ class ToSoccerMapTensor:
                 presser_coo[:, 0],
                 presser_coo[:, 1],
             )
-            matrix[0 + i * 9, y_bin_press, x_bin_press] = 1
+            matrix[0 + i * num_features, y_bin_press, x_bin_press] = 1
 
             # CH 1: Locations of attacking team
             x_bin_att, y_bin_att = self._get_cell_indexes(
                 players_att_coo[:, 0],
                 players_att_coo[:, 1],
             )
-            matrix[1 + i * 9, y_bin_att, x_bin_att] = 1
+            matrix[1 + i * num_features, y_bin_att, x_bin_att] = 1
 
             # CH 2: Locations of defending team
             x_bin_def, y_bin_def = self._get_cell_indexes(
                 players_def_coo[:, 0],
                 players_def_coo[:, 1],
             )
-            matrix[2 + i * 9, y_bin_def, x_bin_def] = 1
+            matrix[2 + i * num_features, y_bin_def, x_bin_def] = 1
 
             # CH 3: Distance to ball
             yy, xx = np.ogrid[0.5 : self.y_bins, 0.5 : self.x_bins]
 
             x0_ball, y0_ball = self._get_cell_indexes(ball_coo[:, 0], ball_coo[:, 1])
-            matrix[3 + i * 9, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
+            # matrix[3 + i * num_features, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
 
             # CH 4: Distance to goal
             x0_goal, y0_goal = self._get_cell_indexes(goal_coo[:, 0], goal_coo[:, 1])
-            matrix[4 + i * 9, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
+            # matrix[4 + i * num_features, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
             
             # CH 5: Distance to pressor
-            # matrix[5 + i * 9, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
-            # matrix[5 + i * 9, y0_ball, x0_ball] = 1
+            # matrix[5 + i * num_features, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
+            matrix[3 + i * num_features, y0_ball, x0_ball] = 1
 
             # CH 6: Cosine of the angle between the ball and goal
             coords = np.dstack(np.meshgrid(xx, yy))
@@ -438,18 +440,18 @@ class ToSoccerMapTensor:
             ball_coo_bin = np.concatenate((x0_ball, y0_ball))
             a = goal_coo_bin - coords
             b = ball_coo_bin - coords
-            matrix[6 + i * 9, :, :] = np.clip(
-                np.sum(a * b, axis=2) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)), -1, 1
-            )
+            #matrix[4 + i * num_features, :, :] = np.clip(
+            #    np.sum(a * b, axis=2) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)), -1, 1
+            #)
 
             # CH 7: Sine of the angle between the ball and goal
-            # sin = np.cross(a,b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
-            matrix[7 + i * 9, :, :] = np.sqrt(1 - matrix[6 + i * 9, :, :] ** 2)  # This is much faster
+            sin = np.cross(a,b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
+            # matrix[5 + i * num_features, :, :] = np.sqrt(1 - matrix[4 + i * num_features, :, :] ** 2)  # This is much faster
 
             # CH 8: Angle (in radians) to the goal location
-            matrix[8 + i * 9, :, :] = np.abs(
-                np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
-            )
+            #matrix[6 + i * num_features, :, :] = np.abs(
+            #    np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
+            #)
 
         if target is not None:
             return (

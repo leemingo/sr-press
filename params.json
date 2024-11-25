@@ -42,7 +42,7 @@
         },
         "TrainerConfig": {
             "max_epochs": 200,
-            "min_epochs": 100,
+            "min_epochs": 50,
             "gradient_clip_val": 100,
             "devices": 1,
             "accelerator": "auto"
@@ -54,7 +54,7 @@
             }
         },
         "ModelConfig": {
-            "in_channels": 27
+            "in_channels": 21
         },
 
         "EarlyStopConfig": {
