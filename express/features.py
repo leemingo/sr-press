@@ -1255,12 +1255,12 @@ class SectorAnalysis:
         return results
 
         
-        
+   
 @required_fields(["freeze_frame_360", "start_x", "start_y"])
 @simple
-def get_xp_to_player(actions, min_players=3):
+def get_column_sum_to_player(actions):
     # 결과 저장용 2D 배열을 NaN으로 초기화
-    results = np.full((len(actions), min_players), np.nan, dtype=float)
+    results = np.full((len(actions), 10), np.nan, dtype=float)
 
     for i, (_, action) in enumerate(actions.iterrows()):
         if not action["freeze_frame_360"]:
@@ -1280,26 +1280,38 @@ def get_xp_to_player(actions, min_players=3):
         freeze_frame = action["freeze_frame_360"]
         possible_reciever = opponent_locs.index.difference([target_idx])
 
-        xp_values = []
+
+        column_sum_values = []
         for player_idx in possible_reciever:
             sector_analysis = SectorAnalysis(ball_x, ball_y, freeze_frame=freeze_frame, angle=45, player_idx=player_idx, visualize=False)
-            xp_result = sector_analysis.calculate_xP()
-            xp_values.append({
+            
+            sector_analysis.calculate_opponents_in_sector()
+            sector_analysis.calculate_gaussian_distribution()
+            # xp_result = sector_analysis.calculate_xP()
+            # xp_values.append({
+            #     "player_idx": player_idx,
+            #     "distance": np.sqrt((sector_analysis.teammate['x'] - ball_x) ** 2 + (sector_analysis.teammate['y'] - ball_y) ** 2),
+            #     "xP": xp_result[0]["xP"]
+            # })
+            
+            column_sum=sector_analysis.get_column_sum()
+            column_sum_values.append({
                 "player_idx": player_idx,
-                "distance": np.sqrt((sector_analysis.teammate['x'] - ball_x) ** 2 + (sector_analysis.teammate['y'] - ball_y) ** 2),
-                "xP": xp_result[0]["xP"]
+                "column_sum": column_sum
             })
 
         # 거리 기준 정렬
-        xp_values = sorted(xp_values, key=lambda x: x["xP"], reverse=True)
+        column_sum_values = sorted(column_sum_values, key=lambda x: x["column_sum"], reverse=True)
 
         # xP 값만 추출하여 NaN 배열에 채우기
-        xp_only = [x["xP"] for x in xp_values]
-        results[i, :len(xp_only)] = xp_only[:min_players]
+        column_sum_only = [x["column_sum"] for x in column_sum_values]
+        results[i, :len(column_sum_only)] = column_sum_only
+
 
     # 결과를 데이터프레임으로 변환
-    columns = [f"xp_to_idx{i+1}" for i in range(min_players)]
-    return pd.DataFrame(results, index=actions.index, columns=columns)
+    column_sum_only = [f"column_sum_to_idx{i+1}" for i in range(10)]
+    return pd.DataFrame(results, index=actions.index, columns=column_sum_only)
+
 
 
 
@@ -1351,7 +1363,7 @@ all_features = [
     closest_3_players,
     extract_all_players,
     expected_receiver_and_presser,
-    get_xp_to_player
+    get_column_sum_to_player
 ]
 
 
