@@ -1,0 +1,136 @@
+{
+    "xgboost": {
+        "ModelConfig": {
+        "n_estimators": 200,
+        "max_depth": 4,
+        "seed": 0,
+        "enable_categorical": true,
+        "n_jobs": -1,
+        "tree_method": "hist",
+        "device": "cuda",
+        "verbosity": 0,
+        "eval_metric": "logloss"
+        }
+    },
+    "xgboost1": {
+        "ModelConfig": {
+        "n_estimators": 200,
+        "learning_rate": 0.1,
+        "max_depth": 4,
+        "colsample_bytree": 0.8,
+        "min_child_weight": 1,
+        "subsample": 0.8,
+        "seed": 0,
+        "enable_categorical": true,
+        "n_jobs": -1,
+        "tree_method": "hist",
+        "device": "cuda",
+        "verbosity": 0,
+        "eval_metric": "logloss"
+        }
+    },
+
+    "symbolic_regression": {
+        "ModelConfig": {
+            "population_size": 3000,
+            "generations": 100,
+            "tournament_size": 30,
+            "stopping_criteria": 0.2,
+            "const_range": [-1, 1],
+            "parsimony_coefficient": 0.001,
+            "p_crossover": 0.7,
+            "p_subtree_mutation": 0.1,
+            "p_hoist_mutation": 0.05,
+            "p_point_mutation": 0.1,
+            "function_set": ["add", "mul", "sub", "div", "abs", "sqrt", "sin", "tan", "cos", "max", "min"],
+            "verbose": 1,
+            "random_state": 1,
+            "n_jobs": -1,
+            "init_depth": [2, 6],
+            "max_samples": 0.9
+        }
+    },
+
+    "soccermap": {
+        "DataConfig": {
+            "batch_size": 16,
+            "num_workers": 8,
+            "pin_memory": true
+        },
+        "TrainerConfig": {
+            "max_epochs": 200,  
+            "min_epochs": 30,   
+            "gradient_clip_val": 100,
+            "devices": 1,
+            "accelerator": "auto"
+        },
+        "OptimizerConfig": {
+            "optimizer_params": {
+                "lr": 1e-3,  
+                "weight_decay": 1e-8
+            },
+            "scheduler_params": {
+                "type": "StepLR",
+                "step_size": 20,
+                "gamma": 0.1
+            }
+        },
+        "ModelConfig": {
+            "in_channels": 12
+        },
+
+        "EarlyStopConfig": {
+            "patience": 10,
+            "min_delta": 1e-4,
+            "mode": "min",
+            "strict": false,
+            "verbose": true
+        },
+        "ModelCheckpoint": {
+            "save_top_k": 1,
+            "verbose": true,
+            "mode": "min"
+        }
+    },
+
+    "baseline": {
+        "DataConfig": {
+            "batch_size": 128,
+            "num_workers": 8,
+            "pin_memory": true
+        },
+        "TrainerConfig": {
+            "max_epochs": 1000,  
+            "min_epochs": 1000,   
+            "gradient_clip_val": 1.0,
+            "devices": 1,
+            "accelerator": "auto"
+        },
+        "OptimizerConfig": {
+            "optimizer_params": {
+                "lr": 1e-2,  
+                "weight_decay": 1e-6 
+            },
+            "lr_scheduler_params": {  
+                "step_size": 100,
+                "gamma": 0.9
+            }
+        },
+        "ModelConfig": {
+            "in_channels": 8
+        },
+
+        "EarlyStopConfig": {
+            "patience": 1000,
+            "min_delta": 1e-5,
+            "mode": "min",
+            "strict": false,
+            "verbose": true
+        },
+        "ModelCheckpoint": {
+            "save_top_k": 1,
+            "verbose": true,
+            "mode": "min"
+        }
+    }
+}

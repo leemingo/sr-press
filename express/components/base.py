@@ -5,14 +5,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
-import mlflow
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 import torch
-import xgboost as xgb
+from xgboost import XGBClassifier, XGBRegressor
 from gplearn.genetic import SymbolicClassifier
 from rich.progress import track
+from tqdm import tqdm
 from sklearn.model_selection import cross_val_score, train_test_split
 from torch.utils.data import DataLoader, Subset, random_split
 
@@ -25,15 +26,16 @@ class exPressComponent(ABC):
     component_name = "default"
 
     def __init__(
-        self, features: Union[List, Dict], label: List, transform: Optional[Callable] = None
+        self, features: Dict, label: List, transform: Optional[Callable] = None
     ):
-        self.features = features
+        self.state_features = features["state_xfns"]
+        self.pressure_features = features["pressure_xfns"]
         self.label = label
         self.transform = transform
 
     def initialize_dataset(self, dataset: Union[PressingDataset, Callable]) -> PressingDataset:
         if callable(dataset):
-            return dataset(xfns=self.features, yfns=self.label, transform=self.transform)
+            return dataset(state_xfns=self.state_features, pressure_xfns=self.pressure_features, yfns=self.label, transform=self.transform)
         return dataset
 
     @abstractmethod
@@ -67,8 +69,6 @@ class expressXGBoostComponent(exPressComponent):
         self.model = model
 
     def train(self, dataset, optimized_metric=None, **train_cfg) -> Optional[float]:
-        mlflow.xgboost.autolog()
-
         # Load data
         data = self.initialize_dataset(dataset)
         X_train, X_val, y_train, y_val = train_test_split(
@@ -87,23 +87,21 @@ class expressXGBoostComponent(exPressComponent):
     def test(self, dataset) -> Dict[str, float]:
         data = self.initialize_dataset(dataset)
         X_test, y_test = data.features, data.labels
-        if isinstance(self.model, xgb.XGBClassifier):
+        if isinstance(self.model, XGBClassifier):
             y_hat = self.model.predict_proba(X_test)[:, 1]
-        elif isinstance(self.model, xgb.XGBRegressor):
-            y_hat = self.model.predict(X_test)
         else:
             raise AttributeError(f"Unsupported xgboost model: {type(self.model)}")
+        
         return self._get_metrics(y_test, y_hat)
 
     def predict(self, dataset) -> pd.Series:
         data = self.initialize_dataset(dataset)
-        if isinstance(self.model, xgb.XGBClassifier):
+        if isinstance(self.model, XGBClassifier):
             y_hat = self.model.predict_proba(data.features)[:, 1]
-        elif isinstance(self.model, xgb.XGBRegressor):
-            y_hat = self.model.predict(data.features)
         else:
             raise AttributeError(f"Unsupported xgboost model: {type(self.model)}")
-        return pd.Series(y_hat, index=data.features.index)
+
+        return pd.DataFrame(y_hat, index=data.features.index, columns=data.labels.columns)
 
 class expressSymbolicComponent(exPressComponent):
     """Base class for an Symbolic-based component."""
@@ -117,7 +115,6 @@ class expressSymbolicComponent(exPressComponent):
         # Load data
         data = self.initialize_dataset(dataset)
         X_train, y_train = data.features, data.labels
-
 
         self.model.fit(X_train, y_train, **train_cfg)
 
@@ -133,8 +130,6 @@ class expressSymbolicComponent(exPressComponent):
         X_test, y_test = data.features, data.labels
         if isinstance(self.model, SymbolicClassifier):
             y_hat = self.model.predict_proba(X_test)[:, 1]
-        elif isinstance(self.model, SymbolicClassifier):
-            y_hat = self.model.predict(X_test)
         else:
             raise AttributeError(f"Unsupported Symbolic model: {type(self.model)}")
         return self._get_metrics(y_test, y_hat)
@@ -143,8 +138,107 @@ class expressSymbolicComponent(exPressComponent):
         data = self.initialize_dataset(dataset)
         if isinstance(self.model, SymbolicClassifier):
             y_hat = self.model.predict_proba(data.features)[:, 1]
-        elif isinstance(self.model, SymbolicClassifier):
-            y_hat = self.model.predict(data.features)
         else:
             raise AttributeError(f"Unsupported Symbolic model: {type(self.model)}")
-        return pd.Series(y_hat, index=data.features.index)
+        return pd.DataFrame(y_hat, index=data.features.index, columns=data.labels.columns)
+    
+class exPressPytorchComponent(exPressComponent):
+    """Base class for a PyTorch-based component."""
+
+    def __init__(self, 
+                 model, 
+                 features, 
+                 label, 
+                 transform, 
+                 params
+        ):
+        
+        super().__init__(features, label, transform)
+        self.model = model
+        self.params = params
+        self.save_path = params["save_path"]
+
+        checkpoint_callback = ModelCheckpoint(
+            monitor="val_loss",
+            dirpath= self.save_path,
+            filename="{val_loss: .2f}",
+            **self.params["ModelCheckpoint"]
+        )
+
+        early_stop_callback = EarlyStopping(
+            monitor="val_loss",
+            **self.params["EarlyStopConfig"]
+        )
+
+        # Init lightning trainer
+        self.trainer = pl.Trainer(callbacks=[checkpoint_callback, early_stop_callback], 
+                             **self.params["TrainerConfig"])
+    def train(
+        self,
+        dataset,
+        param_grid=None,
+        optimized_metric=None,
+    ) -> Optional[float]:
+
+        # Load data
+        print()
+        print("Generating datasets...")
+        data = self.initialize_dataset(dataset)
+
+        nb_train = int(len(data) * 0.8)
+        lengths = [nb_train, len(data) - nb_train]
+        _data_train, _data_val = random_split(data, lengths)
+
+        train_dataloader = DataLoader(
+            _data_train,
+            shuffle=True,
+            **self.params["DataConfig"]
+        )
+        val_dataloader = DataLoader(
+            _data_val,
+            shuffle=False,
+            **self.params["DataConfig"]
+        )
+  
+        self.trainer.fit(
+            model=self.model,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=val_dataloader,
+        )
+
+        return None
+
+    def test(self, dataset) -> Dict[str, float]:
+        # Load dataset
+        data = self.initialize_dataset(dataset)
+        dataloader = DataLoader(
+            data,
+            shuffle=False,
+            **self.params["DataConfig"]
+        )
+
+        outputs = self.trainer.predict(dataloaders=dataloader, ckpt_path="best")
+        preds, targets = zip(*outputs)
+
+        all_preds = np.concatenate(preds, axis=0)
+        all_targets = np.concatenate(targets, axis=0)
+
+        # Compute metricsreturn 
+        return self._get_metrics(all_targets, all_preds)
+
+    def predict(self, dataset) -> pd.Series:
+        # Load dataset
+        data = self.initialize_dataset(dataset)
+        dataloader = DataLoader(
+            data,
+            shuffle=False,
+            **self.params["DataConfig"]
+        )
+
+        outputs = self.trainer.predict(dataloaders=dataloader)
+        preds, _ = zip(*outputs)
+
+        all_preds = np.concatenate(preds, axis=0)
+
+        return pd.DataFrame(all_preds, index=data.features.index, columns=data.labels.columns)
+
