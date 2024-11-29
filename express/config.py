@@ -10,10 +10,7 @@ field_length = _spadl.field_length
 field_width = _spadl.field_width
 
 results = _spadl.results
-results_df = _spadl.results_df()
-
 bodyparts = _spadl.bodyparts
-bodyparts_df = _spadl.bodyparts_df()
 
 actiontypes = _spadl.actiontypes + [
     "pressing"
@@ -29,3 +26,24 @@ def actiontypes_df() -> pd.DataFrame:
         The 'type_id' and 'type_name' of each Atomic-SPADL action type.
     """
     return pd.DataFrame(list(enumerate(actiontypes)), columns=["type_id", "type_name"])
+
+def results_df() -> pd.DataFrame:
+    """Return a dataframe with the result id and result name of each SPADL action type.
+
+    Returns
+    -------
+    pd.DataFrame
+        The 'result_id' and 'result_name' of each SPADL action type.
+    """
+    return pd.DataFrame(list(enumerate(results)), columns=["result_id", "result_name"])
+
+
+def bodyparts_df() -> pd.DataFrame:
+    """Return a dataframe with the bodypart id and bodypart name of each SPADL action type.
+
+    Returns
+    -------
+    pd.DataFrame
+        The 'bodypart_id' and 'bodypart_name' of each SPADL action type.
+    """
+    return pd.DataFrame(list(enumerate(bodyparts)), columns=["bodypart_id", "bodypart_name"])
