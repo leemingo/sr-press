@@ -108,8 +108,8 @@ def gamestates(actions, nb_prev_actions: int = 3):
          The <nb_prev_actions> previous actions for each action.
     """
 
-    if nb_prev_actions < 1:
-        raise ValueError("The game state should include at least one preceding action.")
+    if nb_prev_actions < 0:
+        raise ValueError("The game state should include at least zero preceding action.")
     states = [actions]
     for i in range(1, nb_prev_actions):
         # Issue 1: List-type columns like ['visible_area_360', 'freeze_frame_360'] raise TypeError during interpolation.
@@ -173,9 +173,15 @@ def actiontype(actions):
     Returns
     -------
     Features
-        The 'type_id' of each action.
+        The 'type_name' of each action.
     """
-    return pd.DataFrame(actions["type_id"])
+    X = pd.DataFrame(index=actions.index)
+    X["actiontype"] = pd.Categorical(
+        actions["type_id"].replace(config.actiontypes_df().type_name.to_dict()),
+        categories=config.actiontypes,
+        ordered=False,
+    )
+    return X
 
 @required_fields(["type_name"])
 @simple
@@ -211,10 +217,16 @@ def result(actions):
     Returns
     -------
     Features
-        The 'result_id' of each action.
+        The 'result_name' of each action.
     """
 
-    return pd.DataFrame(actions["result_id"], columns=["result_id"])
+    X = pd.DataFrame(index=actions.index)
+    X["result"] = pd.Categorical(
+        actions["result_id"].replace(config.results_df().result_name.to_dict()),
+        categories=config.results,
+        ordered=False,
+    )
+    return X
 
 @required_fields(["result_name"])
 @simple
@@ -250,10 +262,21 @@ def bodypart(actions):
     Returns
     -------
     Features
-        The 'bodypart_id' of each action.
+        The 'bodypart_name' of each action.
     """
 
-    return pd.DataFrame(actions["bodypart_id"], columns=["bodypart_id"])
+    X = pd.DataFrame(index=actions.index)
+    foot_id = config.bodyparts.index("foot")
+    left_foot_id = config.bodyparts.index("foot_left")
+    right_foot_id = config.bodyparts.index("foot_right")
+    X["bodypart"] = pd.Categorical(
+        actions["bodypart_id"]
+        .replace([left_foot_id, right_foot_id], foot_id)
+        .replace(config.bodyparts_df().bodypart_name.to_dict()),
+        categories=["foot", "head", "other", "head/other"],
+        ordered=False,
+    )
+    return X
 
 @required_fields(["bodypart_name"])
 @simple
@@ -303,6 +326,37 @@ def time(actions):
     """
     timedf = actions[['period_id', 'time_seconds']].copy()
     timedf['time_seconds_overall'] = ((timedf.period_id - 1) * 45 * 60) + timedf.time_seconds
+    return timedf
+
+@required_fields(["period_id", "time_seconds"])
+@simple
+def end_time(actions):
+    """Get the time when each action was performed.
+
+    This generates the following features:
+        :period_id:
+            The ID of the period.
+        :time_seconds:
+            Seconds since the start of the period.
+        :time_seconds_overall:
+            Seconds since the start of the game. Stoppage time during previous
+            periods is ignored.
+
+    Parameters
+    ----------
+    actions : pd.DataFrame
+        The actions of a game.
+
+    Returns
+    -------
+    pd.DataFrame
+        The 'period_id', 'time_seconds' and 'time_seconds_overall' when each
+        action was performed.
+    """
+    timedf = pd.DataFrame()
+    timedf["duration"] = actions["duration"]
+    timedf["end_time_seconds"] = actions["duration"] + actions["time_seconds"]
+
     return timedf
 
 @required_fields(["start_x", "start_y"])
@@ -1100,14 +1154,160 @@ def expected_receiver_and_presser_by_distance(actions, min_players=3):
 
     return pd.concat([distances_df, angles_df], axis=1)
 
+class SectorAnalysis:
+    def __init__(self, ball_x, ball_y, freeze_frame, angle=45, player_idx=0,visualize=False):
+        self.freeze_frame = freeze_frame
+        self.angle = angle        
+        self.player_idx = player_idx
+
+        self.teammate = freeze_frame[player_idx]        
+        self.visualize = visualize
+        self.opponents_in_sector = []
+        self.Z = None
+        self.ball_x = ball_x
+        self.ball_y = ball_y
+        
+
+    def calculate_opponents_in_sector(self):
+        # 부채꼴 내 상대 선수 필터링 및 거리와 각도 계산
+
+        baseline_angle = np.arctan2(self.teammate['y'] - self.ball_y, self.teammate['x'] - self.ball_x)
+        distance = ((self.teammate['x'] - self.ball_x) ** 2 + (self.teammate['y'] - self.ball_y) ** 2) ** 0.5
+        
+        for player in self.freeze_frame:
+            if player['teammate']:  # 상대 선수만 필터링
+                px, py = player['x'], player['y']
+                angle_to_player = np.arctan2(py - self.ball_y, px - self.ball_x)
+                angle_diff = baseline_angle - angle_to_player
+                angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
+
+                # 부채꼴 안에 있는 선수 필터링
+                if abs(angle_diff) <= np.radians(self.angle / 2):
+                    dist_to_player = np.sqrt((px - self.ball_x) ** 2 + (py - self.ball_y) ** 2)
+                    if dist_to_player <= distance:
+                        self.opponents_in_sector.append((angle_diff, dist_to_player))
+
+
+    def calculate_gaussian_distribution(self, sigma_x=0.2, sigma_y=3):
+        # 각도와 거리 데이터를 기반으로 가우시안 분포 계산 후 그리드에 누적
+        angles = np.array([angle for angle, _ in self.opponents_in_sector])
+        distances = np.array([dist for _, dist in self.opponents_in_sector])
+
+        x_bins = np.linspace(-1.5, 1.5, 20)
+        y_bins = np.linspace(0, 50, 20)
+        Z = np.zeros((len(y_bins) - 1, len(x_bins) - 1))
+
+
+        # 가우시안 분포 계산
+        for angle, dist in zip(angles, distances):
+            for i in range(len(x_bins) - 1):
+                for j in range(len(y_bins) - 1):
+                    x_center = (x_bins[i] + x_bins[i + 1]) / 2
+                    y_center = (y_bins[j] + y_bins[j + 1]) / 2
+                    gaussian = np.exp(-(((x_center - angle) ** 2) / (2 * sigma_x ** 2) +
+                                        ((y_center - dist) ** 2) / (2 * sigma_y ** 2)))
+                    Z[j, i] += gaussian
+
+        self.Z = Z
+        self.x_bins = x_bins
+        self.y_bins = y_bins
+
+
+    def get_column_sum(self):
+        closest_index = np.abs(self.x_bins - 0).argmin()
+        column_sum = self.Z[:, closest_index].sum()
+        return column_sum
+    
+    def calculate_xP(self, distance_lambda_=0.005, column_gamma_=2, sigma_x=0.2, sigma_y=3):
+    
+        results = []
+        column_sums = []      
+            #
+        distance = np.sqrt((self.teammate['x'] - self.ball_x) ** 2 + (self.teammate['y'] - self.ball_y) ** 2)
+        
+        # 압박(column sum) 계산
+        self.calculate_opponents_in_sector()
+        self.calculate_gaussian_distribution(sigma_x=sigma_x, sigma_y=sigma_y)
+        column_sum = self.get_column_sum()
+        
+        column_sums.append(column_sum)
+        results.append({
+            "receiver_idx": self.player_idx,
+            "distance": distance,
+            "column_sum": column_sum,
+            "xP": None  # xP는 나중에 계산
+        })
+
+        for result in results:
+            # xP 계산
+            result["xP"] = (
+                (1+np.log(-distance_lambda_ * result["distance"]+1))*
+                (1/(1+column_gamma_*result["column_sum"]))         
+            )
+        return results
+
+        
+   
+@required_fields(["freeze_frame_360", "start_x", "start_y"])
+@simple
+def get_column_sum_to_player(actions):
+    # 결과 저장용 2D 배열을 NaN으로 초기화
+    results = np.full((len(actions), 10), np.nan, dtype=float)
+
+    for i, (_, action) in enumerate(actions.iterrows()):
+        if not action["freeze_frame_360"]:
+            continue
+
+        df_freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
+        start_x, start_y = action.start_x, action.start_y
+
+        # 상대 선수 필터링
+        opponent_locs = df_freeze_frame[~df_freeze_frame.teammate]
+        if opponent_locs.empty:
+            continue
+        dist_presser_to_target = np.sqrt((opponent_locs.x - start_x) ** 2 + (opponent_locs.y - start_y) ** 2)
+        target_idx = dist_presser_to_target.idxmin()
+        ball_x, ball_y = opponent_locs.loc[target_idx, ["x", "y"]].values
+
+        freeze_frame = action["freeze_frame_360"]
+        possible_reciever = opponent_locs.index.difference([target_idx])
+
+
+        column_sum_values = []
+        for player_idx in possible_reciever:
+            sector_analysis = SectorAnalysis(ball_x, ball_y, freeze_frame=freeze_frame, angle=45, player_idx=player_idx, visualize=False)
+            
+            sector_analysis.calculate_opponents_in_sector()
+            sector_analysis.calculate_gaussian_distribution()
+            # xp_result = sector_analysis.calculate_xP()
+            # xp_values.append({
+            #     "player_idx": player_idx,
+            #     "distance": np.sqrt((sector_analysis.teammate['x'] - ball_x) ** 2 + (sector_analysis.teammate['y'] - ball_y) ** 2),
+            #     "xP": xp_result[0]["xP"]
+            # })
+            
+            column_sum=sector_analysis.get_column_sum()
+            column_sum_values.append({
+                "player_idx": player_idx,
+                "column_sum": column_sum
+            })
+
+        # 거리 기준 정렬
+        column_sum_values = sorted(column_sum_values, key=lambda x: x["column_sum"], reverse=True)
+
+        # xP 값만 추출하여 NaN 배열에 채우기
+        column_sum_only = [x["column_sum"] for x in column_sum_values]
+        results[i, :len(column_sum_only)] = column_sum_only
+
+
+    # 결과를 데이터프레임으로 변환
+    column_sum_only = [f"column_sum_to_idx{i+1}" for i in range(10)]
+    return pd.DataFrame(results, index=actions.index, columns=column_sum_only)
+
 # parameter(radius) set
 defenders_in_3m_radius = required_fields(["start_x", "start_y", "end_x", "end_y", "freeze_frame_360"])(
     simple(partial(_opponents_in_radius, radius=3)))
 defenders_in_3m_radius.__name__ = "defenders_in_3m_radius"
-
-closest_3_players = required_fields(["freeze_frame_360", "start_x", "start_y"]
-)(simple(partial(closest_players, num_players=3)))  # parameter: num_players=3
-closest_3_players.__name__ = "closest_3_players"
 
 closest_11_players = required_fields(["freeze_frame_360", "start_x", "start_y"]
 )(simple(partial(closest_players, num_players=11)))  # parameter: num_players=11
@@ -1143,17 +1343,18 @@ all_features = [
 
     angle,
     under_pressure,
-    packing_rate,
-    ball_height_onehot,
+    # packing_rate,
+    # ball_height_onehot,
 
     speed,
     freeze_frame_360,
-    nb_opp_in_path,
+    # nb_opp_in_path,
     dist_opponent,
     defenders_in_3m_radius,
-    closest_3_players,
+    # closest_3_players,
     closest_11_players,
-    expected_3_receiver_and_presser_by_distance
+    # expected_3_receiver_and_presser_by_distance
+    get_column_sum_to_player
 ]
 
 
@@ -1193,7 +1394,15 @@ def get_features(
         idx = pd.Series([True] * len(actions), index=actions.index)
     else:
         idx = actionfilter(actions)
-        
+
+    
+    # 압박이 아닌 첫 이벤트
+    actions["last_non_pressing_idx"] = None
+    for i, row in actions.iterrows():
+        if row["type_name"] != "pressing":  # Non-pressing event
+            last_non_pressing = row["action_id"]  # Update last non-pressing action_id
+        actions.at[i, "last_non_pressing_idx"] = last_non_pressing
+
     # check if we have to return an empty dataframe
     if idx.sum() < 1:
         column_names = []
@@ -1209,9 +1418,15 @@ def get_features(
     # convert actions to gamestates
     home_team_id, _ = db.get_home_away_team_id(game_id)
 
-    states = play_left_to_right(gamestates(actions, nb_prev_actions), home_team_id)
-    states = [state.loc[idx].copy() for state in states]
+    pressure_state = play_left_to_right(gamestates(actions.loc[idx], 1), home_team_id)
+    game_states = play_left_to_right(gamestates(actions[actions["type_name"] != "pressing"], nb_prev_actions), home_team_id)
 
+    last_idx = pressure_state[0]["last_non_pressing_idx"].values
+    game_states = [s.loc[last_idx] for s in game_states]
+
+    states = pressure_state + game_states
+    states = [s.reset_index(drop=True) for s in states]
+    
     # compute features
     df_features = reduce(
         lambda left, right: pd.merge(left, right, how="outer", left_index=True, right_index=True),
