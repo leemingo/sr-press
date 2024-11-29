@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
+import random
 import pandas as pd
 from rich.progress import track
 from tqdm import tqdm
@@ -10,6 +11,7 @@ from torch.utils.data import Dataset
 
 import express.config as config
 from express import features, labels
+from express.utils import pressed_prev_actions, load_actions
 
 class PressingDataset(Dataset):
     """A dataset containing Pressing.
@@ -39,11 +41,13 @@ class PressingDataset(Dataset):
         path: Optional[os.PathLike[str]] = None, 
         load_cached: bool = True,
         nb_prev_actions: int = 1,
+        pressing_filter: bool = False
     ):
 
         # Check requested features and labels
         self.nb_prev_actions = nb_prev_actions
         self.transform = transform
+        self.augment = False
 
         self.xfns = self._parse_xfns(xfns)
         self.yfns = self._parse_yfns(yfns)
@@ -77,6 +81,23 @@ class PressingDataset(Dataset):
                     )
             except FileNotFoundError:
                 raise FileNotFoundError("No complete dataset found at %s. Run 'create' to create it.", self.store)
+
+        # nb_prev_action내 압박을 당한 액션이 존재하는 데이터셋 한정한 분석
+        # 압박 당한 액션: 압박액션시작시점
+        if pressing_filter:
+            print("pressing_filtering.....")
+            db_actions = {game_id: load_actions(game_id) for game_id in self._features.index.get_level_values("game_id").unique()}
+            pressing_mask = self._features.reset_index().apply(
+                lambda row: pressed_prev_actions(
+                    row, 
+                    db_actions[row.game_id], 
+                    self.nb_prev_actions
+                ), 
+                axis=1
+            )
+            pressing_mask.index = self._features.index
+            self._features = self._features.loc[pressing_mask]
+            self._labels = self._labels.loc[pressing_mask]
 
     # The @staticmethod decorator is removed to access `nb_prev_actions` from the PressingDataset instance.
     # By removing it, we can utilize `self.nb_prev_actions` directly within this method.
@@ -119,6 +140,7 @@ class PressingDataset(Dataset):
                     raise ValueError(f"No labeling function found that matches '{yfn}'.")
             else:
                 parsed_yfns.append(yfn)
+ 
         return parsed_yfns
 
     # The @staticmethod decorator is removed to access `min_players` from the PressingDataset instance.
@@ -232,6 +254,19 @@ class PressingDataset(Dataset):
         if self.labels is not None:
             sample_target = self.labels.iloc[idx].to_dict()
             game_id, action_id = self.labels.iloc[idx].name
+
+        if self.augment:
+            freeze_frame = pd.DataFrame.from_records(sample_features["freeze_frame_360_a0"]).copy()
+
+            augment_num = 1#random.randint(1, len(freeze_frame)) # 1<= num <= total_player
+            augment_idxs = random.sample(list(freeze_frame.index), augment_num) 
+
+            random_shift_x = (random.random() - 0.5) * config.field_length / 5  # from -0.1 to 0.1 * pitch_size
+            random_shift_y = (random.random() - 0.5) * config.field_width / 5  # from -0.1 to 0.1 * pitch_size
+            freeze_frame.loc[augment_idxs, ["x"]] += random_shift_x
+            freeze_frame.loc[augment_idxs, ["y"]] += random_shift_y
+            
+            sample_features["freeze_frame_360_a0"] = freeze_frame.to_dict(orient='records')
 
         sample = {
             "game_id": game_id,
