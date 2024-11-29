@@ -57,22 +57,58 @@ def concede_shots(actions: pd.DataFrame, nr_actions: int = 10) -> pd.DataFrame:
     """
 
     shots = actions["type_name"] == "shot"
-    y = pd.concat([shots, actions["team_id"]], axis=1)
-    y.columns = ["shot", "team_id"]
+    y = pd.concat([shots, actions[["team_id", "period_id"]]], axis=1)
+    y.columns = ["shot", "team_id", "period_id"]
 
     # adding future results
     for i in range(1, nr_actions):
-        for c in ["team_id", "shot"]:
+        for c in ["team_id", "shot", "period_id"]:
             shifted = y[c].shift(-i) # Shifts to the near future
             shifted[-i:] = y[c].iloc[len(y) - 1] # Fill missing values at the end
             y["%s+%d" % (c, i)] = shifted
 
     res = y["shot"]
     for i in range(1, nr_actions):
-        gi = y["shot+%d" % i] & (y["team_id+%d" % i] != y["team_id"]) # presser과 다른 팀의 선수가 슛을 성공하면
+        gi = (y["period_id+%d" % i] == y["period_id"]) & (y["shot+%d" % i]) & (y["team_id+%d" % i] != y["team_id"]) # presser과 다른 팀의 선수가 슛을 성공하면
         res = res | gi
 
     return pd.DataFrame(res, columns=["concede_shots"])
+
+# def possession_change_by_seconds(actions: pd.DataFrame, n_seconds: int = 5) -> pd.DataFrame:
+#     """
+#     Determine if possession changes within n (5) seconds after each 'pressing' action in the game_actions DataFrame.
+
+#     Parameters:
+#     actions : pd.DataFrame
+#         The actions of a game.
+#     n_seconds : int, default=5
+#         The time limit in seconds to consider for posession changed actions after a pressing.
+
+
+#     Returns
+#     -------
+#     pd.DataFrame
+#         A DataFrame with a column 'change_posessions' where each row is True if a posession changed occurs within the
+#         specified time limit after a pressing; otherwise False.
+#     """
+
+#     actions["possession_change_by_seconds"] = False
+#     pressing_actions = actions[actions["type_name"] == "pressing"]
+
+#     for pressing_idx, pressing_row in pressing_actions.iterrows():
+#         # Filter events within the same period and within the time window
+#         window_events = actions[
+#             (actions["period_id"] == pressing_row["period_id"]) &
+#             (actions["time_seconds"] >= pressing_row["time_seconds"]) &
+#             (actions["time_seconds"] <= pressing_row["time_seconds"] + n_seconds) &
+#             (actions["type_name"].isin(attracking_actiontypes))
+#         ]
+
+#         if not window_events.empty:
+#             if pressing_row["team_id"] in window_events["team_id"].values:
+#                 actions.at[pressing_idx, "possession_change_by_seconds"] = True
+
+#     return actions[["possession_change_by_seconds"]]
 
 def possession_change_by_seconds(actions: pd.DataFrame, n_seconds: int = 5) -> pd.DataFrame:
     """
@@ -82,33 +118,80 @@ def possession_change_by_seconds(actions: pd.DataFrame, n_seconds: int = 5) -> p
     actions : pd.DataFrame
         The actions of a game.
     n_seconds : int, default=5
-        The time limit in seconds to consider for posession changed actions after a pressing.
+        The time limit in seconds to consider for possession changed actions after a pressing.
 
 
     Returns
     -------
     pd.DataFrame
-        A DataFrame with a column 'change_posessions' where each row is True if a posession changed occurs within the
+        A DataFrame with a column 'change_possessions' where each row is True if a possession changed occurs within the
         specified time limit after a pressing; otherwise False.
     """
+    pressing = actions["type_name"] == "pressing"
+    pressing_idx_list = list(pressing[pressing==True].index)
 
-    actions["possession_change_by_seconds"] = False
-    pressing_actions = actions[actions["type_name"] == "pressing"]
+    for pressing_idx in pressing_idx_list:
+        pressing_row = actions.loc[pressing_idx]
+        seq_idx_list = list(actions[(actions['period_id'] == pressing_row['period_id']) & (actions['time_seconds'] >= pressing_row['time_seconds']) & (actions['time_seconds'] <= pressing_row['time_seconds'] + n_seconds)].index) # Indexing events within n seconds
 
-    for pressing_idx, pressing_row in pressing_actions.iterrows():
-        # Filter events within the same period and within the time window
-        window_events = actions[
-            (actions["period_id"] == pressing_row["period_id"]) &
-            (actions["time_seconds"] >= pressing_row["time_seconds"]) &
-            (actions["time_seconds"] <= pressing_row["time_seconds"] + n_seconds) &
-            (actions["type_name"].isin(attracking_actiontypes))
-        ]
+        delayed_actions = ["throw_in", "freekick_short", "freekick_crossed", "corner_crossed", "corner_short"]
+        if seq_idx_list[-1] != actions['action_id'].max():
+            if actions.loc[seq_idx_list[-1]+1]['type_name'] in delayed_actions:
+                seq_idx_list.append(seq_idx_list[-1] + 1)
+        seq_df = actions.loc[seq_idx_list]
+        seq_df = seq_df[seq_df['original_event_id'].notna()]
 
-        if not window_events.empty:
-            if pressing_row["team_id"] in window_events["team_id"].values:
-                actions.at[pressing_idx, "possession_change_by_seconds"] = True
+        possession_actions = ["pass", "dribble", "cross", "shot"] + delayed_actions
+        pressing_team_id = pressing_row['team_id']
+        if not seq_df[(seq_df['team_id'] == pressing_team_id) & (seq_df['type_name'].isin(possession_actions))].empty:
+            pressing[pressing_idx] = True
+        else:
+            pressing[pressing_idx] = False
+    return pd.DataFrame(pressing.values, columns=[f"possession_change_by_{n_seconds}_seconds"])
 
-    return actions[["possession_change_by_seconds"]]
+def possession_change_by_seconds_and_distance(actions: pd.DataFrame, n_seconds: int = 5, distance: int = 5) -> pd.DataFrame:
+    """
+    Determine if possession changes within n (5) seconds after each 'pressing' action in the game_actions DataFrame.
+
+    Parameters:
+    actions : pd.DataFrame
+        The actions of a game.
+    n_seconds : int, default=5
+        The time limit in seconds to consider for possession changed actions after a pressing.
+
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with a column 'change_possessions' where each row is True if a possession changed occurs within the
+        specified time limit after a pressing; otherwise False.
+    """
+    pressing = actions["type_name"] == "pressing"
+    pressing_idx_list = list(pressing[pressing==True].index)
+
+    for pressing_idx in pressing_idx_list:
+        pressing_row = actions.loc[pressing_idx]
+        dist = np.hypot(actions["start_x"] - pressing_row["start_x"], actions["start_y"] - pressing_row["start_y"])
+        seq_idx_list = list(actions[(actions['period_id'] == pressing_row['period_id']) & 
+                                    (actions['time_seconds'] >= pressing_row['time_seconds']) & 
+                                    (actions['time_seconds'] <= pressing_row['time_seconds'] + n_seconds) &
+                                    (dist <= distance)
+                                    ].index) # Indexing events within n seconds
+
+        delayed_actions = ["throw_in", "freekick_short", "freekick_crossed", "corner_crossed", "corner_short"]
+        if seq_idx_list[-1] != actions['action_id'].max():
+            if actions.loc[seq_idx_list[-1]+1]['type_name'] in delayed_actions:
+                seq_idx_list.append(seq_idx_list[-1] + 1)
+        seq_df = actions.loc[seq_idx_list]
+        seq_df = seq_df[seq_df['original_event_id'].notna()]
+
+        possession_actions = ["pass", "dribble", "cross", "shot"] + delayed_actions
+        pressing_team_id = pressing_row['team_id']
+        if not seq_df[(seq_df['team_id'] == pressing_team_id) & (seq_df['type_name'].isin(possession_actions))].empty:
+            pressing[pressing_idx] = True
+        else:
+            pressing[pressing_idx] = False
+    return pd.DataFrame(pressing.values, columns=[f"possession_change_by_{n_seconds}_seconds_and_{distance}m_distance"])
 
 # P(G-|St,pt), if the (defending) team concedes a shot
 def possession_change_by_actions(actions: pd.DataFrame, nr_actions: int = 10) -> pd.DataFrame:
@@ -129,19 +212,19 @@ def possession_change_by_actions(actions: pd.DataFrame, nr_actions: int = 10) ->
     """
 
     attracking_actions = actions["type_name"].isin(attracking_actiontypes)
-    y = pd.concat([attracking_actions, actions["team_id"]], axis=1)
-    y.columns = ["attacking", "team_id"]
+    y = pd.concat([attracking_actions, actions[["team_id", "period_id"]]], axis=1)
+    y.columns = ["attacking", "team_id", "period_id"]
 
     # adding future results
     for i in range(1, nr_actions):
-        for c in ["team_id", "attacking"]:
+        for c in ["attacking", "team_id", "period_id"]:
             shifted = y[c].shift(-i) # Shifts to the near future
             shifted[-i:] = y[c].iloc[len(y) - 1] # Fill missing values at the end
             y["%s+%d" % (c, i)] = shifted
 
     res = pd.Series([False] * len(actions))
     for i in range(1, nr_actions):
-        pressing_indicator = (y["team_id+%d" % i] == y["team_id"]) & (y["attacking+%d" % i]) # presser과 다른 팀의 선수가 슛을 성공하면
+        pressing_indicator = (y["period_id+%d" % i] == y["period_id"]) & (y["team_id+%d" % i] == y["team_id"]) & (y["attacking+%d" % i]) 
 
         res = res | pressing_indicator
 
@@ -166,12 +249,12 @@ def possession_change_by_actions_and_distance(actions: pd.DataFrame, nr_actions:
     """
 
     attracking_actions = actions["type_name"].isin(attracking_actiontypes)
-    y = pd.concat([attracking_actions, actions[["team_id", "start_x", "start_y"]]], axis=1)
-    y.columns = ["attacking", "team_id", "start_x", "start_y"]
+    y = pd.concat([attracking_actions, actions[["team_id", "start_x", "start_y", "period_id"]]], axis=1)
+    y.columns = ["attacking", "team_id", "start_x", "start_y", "period_id"]
 
     # adding future results
     for i in range(1, nr_actions):
-        for c in ["team_id", "attacking", "start_x", "start_y"]:
+        for c in ["attacking", "team_id", "start_x", "start_y", "period_id"]:
             shifted = y[c].shift(-i) # Shifts to the near future
             shifted[-i:] = y[c].iloc[len(y) - 1] # Fill missing values at the end
             y["%s+%d" % (c, i)] = shifted
@@ -179,7 +262,7 @@ def possession_change_by_actions_and_distance(actions: pd.DataFrame, nr_actions:
     res = pd.Series([False] * len(actions))
     for i in range(1, nr_actions):
         dist = np.hypot(y["start_x+%d" % i] - y["start_x"], y["start_y+%d" % i] - y["start_y"])
-        pressing_indicator = (y["team_id+%d" % i] == y["team_id"]) & (y["attacking+%d" % i]) & (dist <= distance)
+        pressing_indicator = (y["period_id+%d" % i] == y["period_id"]) & (y["team_id+%d" % i] == y["team_id"]) & (y["attacking+%d" % i]) & (dist <= distance)
 
         res = res | pressing_indicator
 
@@ -206,23 +289,32 @@ def counterpress(actions: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(counter_press.values, columns=["counterpress"])
 
 # Dynamically create variables for possession change functions for actions 1 to 10
-k = 1
-for i in range(k, 11):
+for i in range(2, 8, 2):
     globals()[f"possession_change_by_{i}_actions"] = partial(possession_change_by_actions, nr_actions=i)
     globals()[f"possession_change_by_{i}_actions"].__name__ = f"possession_change_by_{i}_actions"
 
 # Dynamically create variables for possession change functions for actions 1 to 10
-k = 1
-distance = 5
-for i in range(k, 11):
-    globals()[f"possession_change_by_{i}_actions_and_{distance}m_distance"] = partial(possession_change_by_actions_and_distance, nr_actions=i, distance=distance)
-    globals()[f"possession_change_by_{i}_actions_and_{distance}m_distance"].__name__ = f"possession_change_by_{i}_actions_and_{distance}m_distance"
+for i in range(2, 8, 2):
+    for d in range(3, 11, 2):
+        globals()[f"possession_change_by_{i}_actions_and_{d}m_distance"] = partial(possession_change_by_actions_and_distance, nr_actions=i, distance=d)
+        globals()[f"possession_change_by_{i}_actions_and_{d}m_distance"].__name__ = f"possession_change_by_{i}_actions_and_{d}m_distance"
+
+for i in range(3, 8):
+    globals()[f"possession_change_by_{i}_seconds"] = partial(possession_change_by_seconds, n_seconds=i)
+    globals()[f"possession_change_by_{i}_seconds"].__name__ = f"possession_change_by_{i}_seconds"
+
+for i in range(3, 8):
+    for d in range(3, 11, 2):
+        globals()[f"possession_change_by_{i}_seconds_and_{d}m_distance"] = partial(possession_change_by_seconds_and_distance, n_seconds=i, distance=d)
+        globals()[f"possession_change_by_{i}_seconds_and_{d}m_distance"].__name__ = f"possession_change_by_{i}_seconds_and_{d}m_distance"
 
 # Dynamically fetch variables for the possession change actions
-dynamic_labels = [globals()[f"possession_change_by_{i}_actions"] for i in range(k, 11)]
-dynamic_labels1 = [globals()[f"possession_change_by_{i}_actions_and_{distance}m_distance"] for i in range(k, 11)]
+dynamic_labels = [globals()[f"possession_change_by_{i}_actions"] for i in range(2, 8, 2)]
+dynamic_labels1 = [globals()[f"possession_change_by_{i}_actions_and_{d}m_distance"] for d in range(3, 11, 2) for i in range(2, 8, 2)]
 
-all_labels = [concede_shots, counterpress, possession_change_by_seconds] + dynamic_labels + dynamic_labels1
+dynamic_labels2 = [globals()[f"possession_change_by_{i}_seconds"] for i in range(3, 8)]
+dynamic_labels3 = [globals()[f"possession_change_by_{i}_seconds_and_{d}m_distance"] for d in range(3, 11, 2) for i in range(3, 8)]
+all_labels = [concede_shots, counterpress] + dynamic_labels + dynamic_labels1 + dynamic_labels2 + dynamic_labels3
 
 def get_labels(
     db: Database,
