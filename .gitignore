@@ -1,0 +1,5 @@
+*.sqlite
+*.parquet
+socceraction/
+lighting/
+src/
