@@ -1,6 +1,8 @@
 """Implements the pass success probability component."""
+
 import os
 from typing import Any, Dict, List
+import numpy as np
 
 import pandas as pd
 import pytorch_lightning as pl
@@ -16,16 +18,13 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    precision_recall_curve,
 )
 from xgboost import XGBClassifier, XGBRegressor
 from gplearn.genetic import SymbolicClassifier
-from .base import (
-    exPressComponent,
-    expressXGBoostComponent,
-    expressSymbolicComponent,
-    exPressPytorchComponent
-)
+from .base import exPressComponent, expressXGBoostComponent, expressSymbolicComponent, exPressPytorchComponent
 from .soccermap import PytorchSoccerMapModel, ToSoccerMapTensor
+
 
 class PressingComponent(exPressComponent):
     """The pressing success probability component."""
@@ -33,7 +32,17 @@ class PressingComponent(exPressComponent):
     component_name = "pressing"
 
     def _get_metrics(self, y, y_hat):
-        y_pred = y_hat > 0.5
+
+        precisions, recalls, thresholds = precision_recall_curve(y, y_hat)
+
+        # F1-score 계산
+        f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-10)
+
+        # 최적의 Threshold 찾기
+        best_threshold = thresholds[np.argmax(f1_scores)]
+
+        y_pred = (y_hat > best_threshold).astype(int)
+
         return {
             "precision": precision_score(y, y_pred),
             "recall": recall_score(y, y_pred),
@@ -43,14 +52,16 @@ class PressingComponent(exPressComponent):
             "roc_auc": roc_auc_score(y, y_hat),
         }
 
+
 class XGBoostComponent(PressingComponent, expressXGBoostComponent):
     """A XGBoost model based on handcrafted features."""
 
     def __init__(
-        self, model: XGBClassifier, 
-        features: Dict[str, List[str]], 
+        self,
+        model: XGBClassifier,
+        features: Dict[str, List[str]],
         label: List[str],
-        params: Dict[str, Dict[str, Union[int, str, bool]]] 
+        params: Dict[str, Dict[str, Union[int, str, bool]]],
     ):
         super().__init__(
             model=model,
@@ -69,20 +80,18 @@ class XGBoostComponent(PressingComponent, expressXGBoostComponent):
             grid_search = GridSearchCV(
                 estimator=self.model,
                 param_grid=param_grid,
-                scoring=optimized_metric if optimized_metric else 'accuracy',
+                scoring=optimized_metric if optimized_metric else "accuracy",
                 cv=5,
                 verbose=1,
                 n_jobs=-1,
-                refit=True     
+                refit=True,
             )
             grid_search.fit(X_train, y_train)
             self.model = grid_search.best_estimator_
             print("Best Parameters from GridSearchCV:", grid_search.best_params_)
             print("Best Score from GridSearchCV:", grid_search.best_score_)
         else:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_train, y_train, test_size=0.2, stratify=y_train
-            )
+            X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, stratify=y_train)
             self.model.fit(X_train, y_train, eval_set=[(X_val, y_val)], **train_cfg)
 
         with open(os.path.join(self.save_path, "log.txt"), "w") as f:
@@ -97,14 +106,15 @@ class XGBoostComponent(PressingComponent, expressXGBoostComponent):
                 f.write(f"\n##### {metric_name} #####\n")
                 for epoch, value in enumerate(metric_values):
                     f.write(f"Epoch {epoch + 1}: {value}\n")
-            
+
+
 class SymbolicComponent(PressingComponent, expressSymbolicComponent):
     """A XGBoost model based on handcrafted features."""
 
     def __init__(
-        self, 
-        model: SymbolicClassifier, 
-        features: Dict[str, List[str]], 
+        self,
+        model: SymbolicClassifier,
+        features: Dict[str, List[str]],
         label: List[str],
         params: Dict[str, Dict[str, Union[int, str, bool]]],
     ):
@@ -126,11 +136,11 @@ class SymbolicComponent(PressingComponent, expressSymbolicComponent):
             grid_search = GridSearchCV(
                 estimator=self.model,
                 param_grid=param_grid,
-                scoring=optimized_metric if optimized_metric else 'accuracy',
+                scoring=optimized_metric if optimized_metric else "accuracy",
                 cv=5,
                 verbose=1,
                 n_jobs=-1,
-                refit=True
+                refit=True,
             )
             grid_search.fit(X_train, y_train)
             self.model = grid_search.best_estimator_
@@ -154,7 +164,7 @@ class SymbolicComponent(PressingComponent, expressSymbolicComponent):
                 "\n-----------------------------------------------------------------------------------------------------------\n"
                 " Gen   Length            Fitness          Length             Fitness          OOB Fitness       Time Left\n"
             )
-            for i in range(len(run_details['generation'])):
+            for i in range(len(run_details["generation"])):
                 f.write(
                     f"{run_details['generation'][i]:<4}   "  # Gen
                     f"{run_details['average_length'][i]:<15.2f}   "  # Length
@@ -169,13 +179,13 @@ class SymbolicComponent(PressingComponent, expressSymbolicComponent):
         data = self.initialize_dataset(dataset)
         X_test, y_test = data.features, data.labels
         X_test = X_test.fillna(0)
-        
+
         if isinstance(self.model, SymbolicClassifier):
             y_hat = self.model.predict_proba(X_test)[:, 1]
         else:
             raise AttributeError(f"Unsupported xgboost model: {type(self.model)}")
         return self._get_metrics(y_test, y_hat)
-    
+
     def predict(self, dataset) -> pd.Series:
         data = self.initialize_dataset(dataset)
         X_test, y_test = data.features, data.labels
@@ -186,21 +196,11 @@ class SymbolicComponent(PressingComponent, expressSymbolicComponent):
         else:
             raise AttributeError(f"Unsupported Symbolic model: {type(self.model)}")
         return pd.Series(y_hat, index=X_test.index)
-    
+
+
 class SoccerMapComponent(PressingComponent, exPressPytorchComponent):
     """A SoccerMap deep-learning model."""
 
-    def __init__(self, 
-                 model: PytorchSoccerMapModel, 
-                 features, 
-                 label, 
-                 transform: ToSoccerMapTensor, 
-                 params: dict):
-        
-        super().__init__(
-            model=model,
-            features=features,
-            label=label,
-            transform=transform,
-            params=params
-        )
+    def __init__(self, model: PytorchSoccerMapModel, features, label, transform: ToSoccerMapTensor, params: dict):
+
+        super().__init__(model=model, features=features, label=label, transform=transform, params=params)
