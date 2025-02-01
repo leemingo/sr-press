@@ -122,7 +122,7 @@ if __name__ == "__main__":
             model=PytorchSoccerMapModel(model_config=params["ModelConfig"], optimizer_params=params["OptimizerConfig"]),
             features=features,
             label=label,
-            transform=ToSoccerMapTensor(dim=(68, 104)),
+            transform=ToSoccerMapTensor(dim=(68, 104), label=label),
             params=params,
         )
     else:
