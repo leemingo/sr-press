@@ -28,8 +28,8 @@ class _FeatureExtractionLayer(nn.Module):
 
     def __init__(self, in_channels):
         super().__init__()
-        self.conv_1 = nn.Conv2d(in_channels, 32, kernel_size=(3, 3), stride=1, padding="valid")
-        self.conv_2 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv_1 = nn.Conv2d(in_channels, 128, kernel_size=(3, 3), stride=1, padding="valid")
+        self.conv_2 = nn.Conv2d(128, 128, kernel_size=(3, 3), stride=1, padding="valid")
         # (left, right, top, bottom)
         self.symmetric_padding = nn.ReplicationPad2d((1, 1, 1, 1))
 
@@ -53,7 +53,7 @@ class _PredictionLayer(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(64, 32, kernel_size=(1, 1))
+        self.conv1 = nn.Conv2d(128, 32, kernel_size=(1, 1))
         self.conv2 = nn.Conv2d(32, 1, kernel_size=(1, 1))
 
     def forward(self, x: torch.Tensor):
@@ -135,14 +135,15 @@ class SoccerMap(nn.Module):
     def __init__(self, model_config):
         super().__init__()
 
-        self.in_channels = model_config["in_channels"] * 3
+        nb_prev_actions = 3
+        self.in_channels = model_config["in_channels"] * nb_prev_actions
 
         # Convolutions for feature extraction at 1x, 1/2x and 1/4x scale
         self.features_x1 = _FeatureExtractionLayer(self.in_channels)
-        self.features_x2 = _FeatureExtractionLayer(64)
-        self.features_x4 = _FeatureExtractionLayer(64)
-        self.features_x8 = _FeatureExtractionLayer(64)
-        self.features_x16 = _FeatureExtractionLayer(64)
+        self.features_x2 = _FeatureExtractionLayer(128)
+        self.features_x4 = _FeatureExtractionLayer(128)
+        self.features_x8 = _FeatureExtractionLayer(128)
+        self.features_x16 = _FeatureExtractionLayer(128)
 
         # Layers for down and upscaling and merging scales
         self.up_x2 = _UpSamplingLayer()
@@ -176,7 +177,7 @@ class SoccerMap(nn.Module):
         f_x8 = self.features_x8(self.down_x8(f_x4))
         f_x16 = self.features_x16(self.down_x16(f_x8))
 
-        pred_x16 = self.prediction_x16(f_x16)
+        pred_x16 = self.prediction_x4(f_x16)
 
         # Prediction
         # pred_x1 = self.prediction_x1(f_x1)
@@ -339,7 +340,7 @@ class PytorchSoccerMapModel(pl.LightningModule):
             https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html#configure-optimizers
         """
 
-        return torch.optim.Adam(self.parameters(), **self.optimizer_params["optimizer_params"])
+        return torch.optim.AdamW(self.parameters(), **self.optimizer_params["optimizer_params"])
 
 
 class ToSoccerMapTensor:
@@ -353,10 +354,11 @@ class ToSoccerMapTensor:
         to work with.
     """
 
-    def __init__(self, dim=(68, 104), label=["concede_shots"]):
+    def __init__(self, dim=(68, 104), label=["concede_shots"], nb_prev_actions=3):
         assert len(dim) == 2
         self.y_bins, self.x_bins = dim
         self.label = label[0]
+        self.nb_prev_actions = nb_prev_actions
 
     def _get_cell_indexes(self, x, y):
         x_bin = np.clip(x / 105 * self.x_bins, 0, self.x_bins - 1).astype(np.uint8)
@@ -365,14 +367,21 @@ class ToSoccerMapTensor:
 
     def __call__(self, sample):
 
-        nb_prev_actions = 3
-
-        num_features = 7
+        num_features = 9
         # Output
-        matrix = np.zeros((num_features * nb_prev_actions, self.y_bins, self.x_bins))
+        matrix = np.zeros((num_features * self.nb_prev_actions, self.y_bins, self.x_bins))
 
-        for i in range(nb_prev_actions):
+        for i in range(self.nb_prev_actions):
             start_x, start_y = sample[f"start_x_a{i}"], sample[f"start_y_a{i}"]
+            end_x, end_y = sample[f"end_x_a{i}"], sample[f"end_y_a{i}"]
+
+            actiontpye = sample[f"actiontype_a{i}"]
+
+            matrix[7 + i * num_features] = actiontpye
+
+            result = sample[f"result_a{i}"]
+
+            matrix[8 + i * num_features] = result
 
             if sample[f"freeze_frame_360_a{i}"] is None:
                 continue
@@ -384,6 +393,16 @@ class ToSoccerMapTensor:
             presser_coo = frame.loc[frame.actor, ["x", "y"]].fillna(1e-10).values.reshape(-1, 2)
             # Location of the ball
             ball_coo = np.array([[start_x, start_y]])
+            # End location of the pass
+            end_coo = np.array([[end_x, end_y]])
+
+            # CH 1: Locations of attacking team
+            x_end, y_end = self._get_cell_indexes(
+                end_coo[:, 0],
+                end_coo[:, 1],
+            )
+            matrix[5 + i * num_features, y_end, x_end] = 1
+
             # Location of the goal
             goal_coo = np.array([[105, 34]])
             # Locations of the passing player's teammates
@@ -416,15 +435,17 @@ class ToSoccerMapTensor:
             yy, xx = np.ogrid[0.5 : self.y_bins, 0.5 : self.x_bins]
 
             x0_ball, y0_ball = self._get_cell_indexes(ball_coo[:, 0], ball_coo[:, 1])
-            # matrix[3 + i * num_features, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
+            matrix[3 + i * num_features, :, :] = np.sqrt((xx - x0_ball) ** 2 + (yy - y0_ball) ** 2)
 
             # CH 4: Distance to goal
             x0_goal, y0_goal = self._get_cell_indexes(goal_coo[:, 0], goal_coo[:, 1])
-            # matrix[4 + i * num_features, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
+            matrix[4 + i * num_features, :, :] = np.sqrt((xx - x0_goal) ** 2 + (yy - y0_goal) ** 2)
+
+            # print(x_bin_press.shape, y_bin_att.shape)
 
             # CH 5: Distance to pressor
             # matrix[5 + i * num_features, :, :] = np.sqrt((xx - x_bin_press) ** 2 + (yy - y_bin_press) ** 2)
-            matrix[3 + i * num_features, y0_ball, x0_ball] = 1
+            # matrix[3 + i * num_features, y0_ball, x0_ball] = 1
 
             # CH 6: Cosine of the angle between the ball and goal
             coords = np.dstack(np.meshgrid(xx, yy))
@@ -437,13 +458,13 @@ class ToSoccerMapTensor:
             # )
 
             # CH 7: Sine of the angle between the ball and goal
-            sin = np.cross(a, b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
+            # sin = np.cross(a, b) / (np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2))
             # matrix[5 + i * num_features, :, :] = np.sqrt(1 - matrix[4 + i * num_features, :, :] ** 2)  # This is much faster
 
             # CH 8: Angle (in radians) to the goal location
-            # matrix[6 + i * num_features, :, :] = np.abs(
-            #    np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
-            # )
+            matrix[6 + i * num_features, :, :] = np.abs(
+                np.arctan((y0_goal - coords[:, :, 1]) / (x0_goal - coords[:, :, 0]))
+            )
 
         if target is not None:
             return (

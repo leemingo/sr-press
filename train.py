@@ -78,6 +78,7 @@ if __name__ == "__main__":
         yfns=args.yfns,
         load_cached=True,
         nb_prev_actions=args.nb_prev_actions,
+        augment=True,
     )
     test_dataset = PressingDataset(
         path=os.path.join(base_path, "stores", "datasets", "test"),
@@ -122,7 +123,7 @@ if __name__ == "__main__":
             model=PytorchSoccerMapModel(model_config=params["ModelConfig"], optimizer_params=params["OptimizerConfig"]),
             features=features,
             label=label,
-            transform=ToSoccerMapTensor(dim=(68, 104), label=label),
+            transform=ToSoccerMapTensor(dim=(68, 104), label=label, nb_prev_actions=args.nb_prev_actions),
             params=params,
         )
     else:
