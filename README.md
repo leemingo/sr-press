@@ -49,14 +49,15 @@ git clone https://github.com/ML-KULeuven/socceraction.git
 
 ## exPress Module
 - [databases](https://github.com/leemingo/sr-press/tree/geonhee/express/databases): Data access and SPADL conversion (implemented _fix_pressure in base.py).
-- [features](https://github.com/leemingo/sr-press/blob/geonhee/express/features.py), [labels](https://github.com/leemingo/sr-press/blob/geonhee/express/labels.py): Define features and labels
-- [component](https://github.com/leemingo/sr-press/tree/geonhee/express/components): Train the exPress model
-- [simulates.py](https://github.com/leemingo/sr-press/blob/geonhee/express/simulates.py): 다양한 포지션 변화에 따른 xP를 예측한다
+- [features](https://github.com/leemingo/sr-press/blob/geonhee/express/features.py), [labels](https://github.com/leemingo/sr-press/blob/geonhee/express/labels.py): Define features and labels.
+- [component](https://github.com/leemingo/sr-press/tree/geonhee/express/components): Train the exPress model.
+- [simulates.py](https://github.com/leemingo/sr-press/blob/geonhee/express/simulates.py): Predict xP based on various position changes.
 
-**Training the XGBoost Model**
+## Training Module
 - Once the features and labels are stored in the stores directory, you can perform training using the following steps:
-    1. [3-evaluating-model-performance.ipynb](https://github.com/GeonHeeJo2000/sr-press/blob/main/notebook/3-evaluating-model-performance.ipynb): : Analyze the results of the training performed using [train.py](https://github.com/GeonHeeJo2000/sr-press/blob/main/train.py)
-
+    1. [3-evaluating-model-performance.ipynb](https://github.com/leemingo/sr-press/blob/main/notebook/3-evaluating-model-performance.ipynb): : Analyze the results of the training performed using [train.py](https://github.com/GeonHeeJo2000/sr-press/blob/main/train.py)
+       
+**Training the XGBoost Model**
 ```
 python train.py \
 --model xgboost \
