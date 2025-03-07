@@ -55,7 +55,7 @@ git clone https://github.com/ML-KULeuven/socceraction.git
 
 ## Training Module
 - Once the features and labels are stored in the stores directory, you can perform training using the following steps:
-    1. [3-evaluating-model-performance.ipynb](https://github.com/leemingo/sr-press/blob/main/notebook/3-evaluating-model-performance.ipynb): : Analyze the results of the training performed using [train.py](https://github.com/GeonHeeJo2000/sr-press/blob/main/train.py)
+    1. [3-evaluating-model-performance.ipynb](https://github.com/leemingo/sr-press/blob/main/notebook/3-evaluating-model-performance.ipynb): : Analyze the results of the training performed using [train.py](https://github.com/leemingo/sr-press/blob/main/train.py)
        
 **Training the XGBoost Model**
 ```
