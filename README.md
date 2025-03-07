@@ -3,8 +3,8 @@ This repository presents exPress (Explainable & Expected Press), a framework for
 
 ## installation and environment
 ```
-git clone https://github.com/UoS-CIDA-Lab/exPress.git
-cd exPress
+git clone https://github.com/leemingo/sr-press.git
+cd sr-press
 pip install -r requirements.txt
 ```
 
