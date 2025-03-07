@@ -35,10 +35,10 @@ class PressingComponent(exPressComponent):
 
         precisions, recalls, thresholds = precision_recall_curve(y, y_hat)
 
-        # F1-score 계산
+        # F1-score
         f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-10)
 
-        # 최적의 Threshold 찾기
+        # optimal Threshold
         best_threshold = thresholds[np.argmax(f1_scores)]
 
         y_pred = (y_hat > best_threshold).astype(int)

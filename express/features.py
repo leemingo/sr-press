@@ -923,8 +923,8 @@ def packing_rate(actions):
     return df
 
 def _opponents_in_radius(actions, radius: int = 1):
-    """Get the number of opponent(pressing당하는 선수: 공격수) in a radius around the actions start and end location.
-
+    """Get the number of opponent (player under pressure: attacker) in a radius around the action's start and end location.
+    
     Parameters
     ----------
     actions : SPADLActions
@@ -1169,19 +1169,19 @@ class SectorAnalysis:
         
 
     def calculate_opponents_in_sector(self):
-        # 부채꼴 내 상대 선수 필터링 및 거리와 각도 계산
+        # Filter opponents within the sector and calculate distance and angle
 
         baseline_angle = np.arctan2(self.teammate['y'] - self.ball_y, self.teammate['x'] - self.ball_x)
         distance = ((self.teammate['x'] - self.ball_x) ** 2 + (self.teammate['y'] - self.ball_y) ** 2) ** 0.5
         
         for player in self.freeze_frame:
-            if player['teammate']:  # 상대 선수만 필터링
+            if player['teammate']:  # Filter only opponent players
                 px, py = player['x'], player['y']
                 angle_to_player = np.arctan2(py - self.ball_y, px - self.ball_x)
                 angle_diff = baseline_angle - angle_to_player
                 angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
 
-                # 부채꼴 안에 있는 선수 필터링
+                # Filter players within the sector
                 if abs(angle_diff) <= np.radians(self.angle / 2):
                     dist_to_player = np.sqrt((px - self.ball_x) ** 2 + (py - self.ball_y) ** 2)
                     if dist_to_player <= distance:
@@ -1189,7 +1189,7 @@ class SectorAnalysis:
 
 
     def calculate_gaussian_distribution(self, sigma_x=0.2, sigma_y=3):
-        # 각도와 거리 데이터를 기반으로 가우시안 분포 계산 후 그리드에 누적
+        # Accumulate Gaussian distribution on the grid based on angle and distance data
         angles = np.array([angle for angle, _ in self.opponents_in_sector])
         distances = np.array([dist for _, dist in self.opponents_in_sector])
 
@@ -1198,7 +1198,7 @@ class SectorAnalysis:
         Z = np.zeros((len(y_bins) - 1, len(x_bins) - 1))
 
 
-        # 가우시안 분포 계산
+        # Calculate Gaussian distribution
         for angle, dist in zip(angles, distances):
             for i in range(len(x_bins) - 1):
                 for j in range(len(y_bins) - 1):
@@ -1222,10 +1222,10 @@ class SectorAnalysis:
     
         results = []
         column_sums = []      
-            #
+
         distance = np.sqrt((self.teammate['x'] - self.ball_x) ** 2 + (self.teammate['y'] - self.ball_y) ** 2)
         
-        # 압박(column sum) 계산
+        # Calculate pressure (column sum)
         self.calculate_opponents_in_sector()
         self.calculate_gaussian_distribution(sigma_x=sigma_x, sigma_y=sigma_y)
         column_sum = self.get_column_sum()
@@ -1235,11 +1235,11 @@ class SectorAnalysis:
             "receiver_idx": self.player_idx,
             "distance": distance,
             "column_sum": column_sum,
-            "xP": None  # xP는 나중에 계산
+            "xP": None  # xP will be calculated later
         })
 
         for result in results:
-            # xP 계산
+            # Calculate xP 
             result["xP"] = (
                 (1+np.log(-distance_lambda_ * result["distance"]+1))*
                 (1/(1+column_gamma_*result["column_sum"]))         
@@ -1251,7 +1251,7 @@ class SectorAnalysis:
 @required_fields(["freeze_frame_360", "start_x", "start_y"])
 @simple
 def get_column_sum_to_player(actions):
-    # 결과 저장용 2D 배열을 NaN으로 초기화
+    # Initialize a 2D array for storing results with NaN
     results = np.full((len(actions), 10), np.nan, dtype=float)
 
     for i, (_, action) in enumerate(actions.iterrows()):
@@ -1261,7 +1261,7 @@ def get_column_sum_to_player(actions):
         df_freeze_frame = pd.DataFrame.from_records(action["freeze_frame_360"])
         start_x, start_y = action.start_x, action.start_y
 
-        # 상대 선수 필터링
+        # Filter only opponent players
         opponent_locs = df_freeze_frame[~df_freeze_frame.teammate]
         if opponent_locs.empty:
             continue
@@ -1292,15 +1292,15 @@ def get_column_sum_to_player(actions):
                 "column_sum": column_sum
             })
 
-        # 거리 기준 정렬
+        # Sort by distance
         column_sum_values = sorted(column_sum_values, key=lambda x: x["column_sum"], reverse=True)
 
-        # xP 값만 추출하여 NaN 배열에 채우기
+        # Extract xP values and fill NaN array
         column_sum_only = [x["column_sum"] for x in column_sum_values]
         results[i, :len(column_sum_only)] = column_sum_only
 
 
-    # 결과를 데이터프레임으로 변환
+    # Convert results to DataFrame
     column_sum_only = [f"column_sum_to_idx{i+1}" for i in range(10)]
     return pd.DataFrame(results, index=actions.index, columns=column_sum_only)
 
@@ -1396,7 +1396,7 @@ def get_features(
         idx = actionfilter(actions)
 
     
-    # 압박이 아닌 첫 이벤트
+    # First event that is not under pressure
     actions["last_non_pressing_idx"] = None
     for i, row in actions.iterrows():
         if row["type_name"] != "pressing":  # Non-pressing event

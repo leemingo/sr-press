@@ -13,7 +13,6 @@ from mlflow.utils.model_utils import _get_flavor_configuration
 import express.components
 from express.components.base import exPressComponent
 
-
 def fullname(o):
     klass = o.__class__
     module = klass.__module__

@@ -98,9 +98,9 @@ if __name__ == "__main__":
         key = xfn[0].__name__  # Callable: function
         values = xfn[1]  # List: columns
 
-        # 설명: nb_prev_actions는 현재 액션을 포함해 사용할 액션의 수를 지정합니다.
-        # nb_prev_actions=1: 현재 액션만 사용
-        # nb_prev_actions=2: 현재 액션 + 이전 액션
+        # nb_prev_actions specifies the number of actions to use, including the current action.
+        # nb_prev_actions= 1: Use only the current action
+        # nb_prev_actions= 2: Use the current action + the previous action
         if key in args.xfns:
             features[key] = [value for value in values if int(value[-1:]) < args.nb_prev_actions]
 

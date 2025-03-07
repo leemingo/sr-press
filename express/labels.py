@@ -69,7 +69,8 @@ def concede_shots(actions: pd.DataFrame, nr_actions: int = 10) -> pd.DataFrame:
 
     res = y["shot"]
     for i in range(1, nr_actions):
-        gi = (y["period_id+%d" % i] == y["period_id"]) & (y["shot+%d" % i]) & (y["team_id+%d" % i] != y["team_id"]) # presser과 다른 팀의 선수가 슛을 성공하면
+        # if a player from a different team than the presser takes a shot successfully
+        gi = (y["period_id+%d" % i] == y["period_id"]) & (y["shot+%d" % i]) & (y["team_id+%d" % i] != y["team_id"]) 
         res = res | gi
 
     return pd.DataFrame(res, columns=["concede_shots"])

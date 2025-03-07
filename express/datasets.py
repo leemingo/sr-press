@@ -81,9 +81,9 @@ class PressingDataset(Dataset):
                     )
             except FileNotFoundError:
                 raise FileNotFoundError("No complete dataset found at %s. Run 'create' to create it.", self.store)
-
-        # nb_prev_action내 압박을 당한 액션이 존재하는 데이터셋 한정한 분석
-        # 압박 당한 액션: 압박액션시작시점
+            
+        # Analysis limited to datasets where there is an action under pressure within nb_prev_actions
+        # Action under pressure: Start time of the pressing action
         if pressing_filter:
             print("pressing_filtering.....")
             db_actions = {game_id: load_actions(game_id) for game_id in self._features.index.get_level_values("game_id").unique()}

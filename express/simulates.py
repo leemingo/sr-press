@@ -75,7 +75,7 @@ class exPressComponent(ABC):
         idx = actions[(actions["game_id"] == game_id) & (actions["action_id"] == action_id)].index
 
         if len(idx) != 1:
-            raise ValueError(f"idx 중복 또는 누락 발생: {idx}")
+            raise ValueError(f"Duplicate or missing idx: {idx}")
         else:
             idx = idx[0]
 

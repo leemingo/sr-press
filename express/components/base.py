@@ -209,4 +209,7 @@ class exPressPytorchComponent(exPressComponent):
 
         all_preds = np.concatenate(preds, axis=0)
 
+        # Ensure all_preds is 1-dimensional
+        all_preds = all_preds.flatten()
+
         return pd.Series(all_preds, index=data.features.index)

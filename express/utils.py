@@ -7,8 +7,6 @@ sys.path.append(base_path)
 from typing import Dict, List, Sequence, Union
 import numpy as np
 import pandas as pd
-from shapely.geometry import Polygon, Point, box
-from scipy.spatial import Voronoi
 
 import express.config as config
 from express.databases import SQLiteDatabase
@@ -75,7 +73,6 @@ def play_left_to_right(gamestates: List[pd.DataFrame], home_team_id: int) -> Lis
     return gamestates
 
 def load_actions(game_id):
-    """주어진 game_id에 대한 모든 액션 데이터를 불러옵니다."""
     try:
         TRAIN_DB_PATH = os.path.join(base_path, "stores/train_database.sqlite")
         train_db = SQLiteDatabase(TRAIN_DB_PATH)
