@@ -1,4 +1,4 @@
-# sr-press
+# exPress
 This repository presents exPress (Explainable & Expected Press), a framework for quantifying pressing situations in football by analyzing individual player positioning and movements
 
 ## installation and environment
