@@ -38,6 +38,7 @@ class SQLiteDatabase(Database):
         self, db_path: Union[Literal[":memory:"], os.PathLike[str]] = ":memory:", mode: str = "r"
     ):
         super().__init__(mode)
+
         self.conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
         self.cursor = self.conn.cursor()
         self.create_schema()
@@ -85,6 +86,10 @@ class SQLiteDatabase(Database):
             team_id INTEGER,
             is_starter BOOLEAN,
             minutes_played INTEGER,
+            from_period INTEGER,
+            to_period INTEGER,
+            from_seconds TEXT,
+            to_seconds TEXT,
             starting_position_id INTEGER,
             starting_position_name TEXT,
             jersey_number INTEGER,
@@ -157,8 +162,9 @@ class SQLiteDatabase(Database):
             "REPLACE INTO players VALUES(?,?,?);",
             players[TABLE_PLAYERS].drop_duplicates(subset="player_id").itertuples(index=False),
         )
+
         self.cursor.executemany(
-            "REPLACE INTO player_games VALUES(?,?,?,?,?,?,?,?);",
+            "REPLACE INTO player_games VALUES(?,?,?,?,?,?,?,?,?,?,?,?);",
             players[TABLE_PLAYER_GAMES].itertuples(index=False),
         )
         self.conn.commit()
@@ -187,6 +193,10 @@ class SQLiteDatabase(Database):
             query += " WHERE " + " AND ".join(filters)
         return pd.read_sql_query(query, self.conn).set_index("game_id")
 
+    def player_games(self, game_id: int) -> pd.DataFrame:
+        query = f"SELECT * FROM player_games WHERE game_id = {game_id}"
+        return pd.read_sql_query(query, self.conn).set_index(["player_id", "game_id"])
+    
     def actions(self, game_id: int) -> pd.DataFrame:
         query = f"SELECT * FROM actions WHERE game_id = {game_id}"
         df_actions = pd.read_sql_query(query, self.conn).set_index(["game_id", "action_id"])
