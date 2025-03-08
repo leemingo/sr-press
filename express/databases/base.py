@@ -54,10 +54,6 @@ TABLE_PLAYER_GAMES = [
     "team_id",
     "is_starter",
     "minutes_played",
-    "from_period",
-    "to_period",
-    "from_seconds",
-    "to_seconds",
     "starting_position_id",
     "starting_position_name",
     "jersey_number",
@@ -367,37 +363,11 @@ class Database(ABC):
         games_verbose = list(games.itertuples())
 
         teams, players = [], []
-
         for game in games_verbose:
             try:
                 teams.append(data_loader.teams(game.game_id))
-
-                player = data_loader.players(game.game_id)
-                lineup = data_loader._lineups(game.game_id)
+                players.append(data_loader.players(game.game_id))
                 events = data_loader.events(game.game_id, load_360=True)
-
-                player_mapping = {}
-                for team_dict in lineup: # lineup example: https://github.com/statsbomb/open-data/blob/master/data/lineups/15946.json                
-                    for player_dict in team_dict["lineup"]: 
-                        from_period, to_period, from_seconds, to_seconds = None, None, None, None # 특정 선수(player["player_id"])가 뛴 시작 시간, 끝 시간
-                        for pos in player_dict.get("positions", []): # position별 시작 시간, 끝 시간
-                            from_period_id = pos["from_period"] 
-                            to_period_id = pos["to_period"] if pd.notna(pos["to_period"]) else events["period_id"].max() # period_id's maximum is not 2nd half because of tournament
-                            from_sec = int(pos["from"].split(':')[0]) * 60 + int(pos["from"].split(':')[1]) # convert to seconds  
-                            to_sec = int(pos["to"].split(':')[0]) * 60 + int(pos["to"].split(':')[1]) if pd.notna(pos["to"]) \
-                            else int(player['minutes_played'].max()) * 60 # if pos["to"] is NaN, then set it to the end of the game
-
-                            from_period = from_period_id if from_period is None else min(from_period, from_period_id)
-                            to_period = to_period_id if to_period is None else max(to_period, to_period_id)
-                            from_seconds = from_sec if from_seconds is None else min(from_seconds, from_sec)
-                            to_seconds = to_sec if to_seconds is None else max(to_seconds, to_sec)
-
-                            player_mapping[player_dict["player_id"]] = {"from_period": from_period, "to_period": to_period, 
-                                                                        "from_seconds": from_seconds, "to_seconds": to_seconds}
-
-                player[["from_period", "to_period", "from_seconds", "to_seconds"]] = player["player_id"].apply(lambda x: pd.Series(player_mapping[x]))
-                players.append(player)
-
                 # Store actions
                 actions = _sb_events_to_spadl(events, game.home_team_id)
                 self._import_actions(actions)
